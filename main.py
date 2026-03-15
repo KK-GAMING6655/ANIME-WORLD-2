@@ -1,5 +1,5 @@
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 import sqlite3
 import os
 import random
@@ -20,13 +20,49 @@ def run_flask():
 conn = sqlite3.connect('gacha.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Creating all tables immediately to prevent missing table errors
+# Updated table to include card_id
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS cards (name TEXT PRIMARY KEY, rarity TEXT, value INTEGER, image TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS cards (
+                    card_id INTEGER PRIMARY KEY, 
+                    name TEXT UNIQUE, 
+                    rarity TEXT, 
+                    value INTEGER, 
+                    image TEXT)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS rarities (name TEXT PRIMARY KEY, color TEXT)''')
 conn.commit()
 
-# --- 3. Discord Bot Setup ---
+# --- 3. Pagination View for /view_card ---
+class CardPaginator(ui.View):
+    def __init__(self, cards, start_index):
+        super().__init__(timeout=60)
+        self.cards = cards
+        self.current_page = start_index
+
+    def create_embed(self):
+        card = self.cards[self.current_page]
+        # card[0]=id, card[1]=name, card[2]=rarity, card[3]=value, card[4]=image
+        embed = discord.Embed(description=f"Page {self.current_page + 1}/{len(self.cards)}", color=discord.Color.gold())
+        embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** 🪙 {card[3]}\n**Card ID:** `{card[0]}`", inline=False)
+        embed.set_image(url=card[4])
+        return embed
+
+    @ui.button(label="⬅️", style=discord.ButtonStyle.grey)
+    async def previous_page(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else:
+            await interaction.response.defer()
+
+    @ui.button(label="➡️", style=discord.ButtonStyle.grey)
+    async def next_page(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page < len(self.cards) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else:
+            await interaction.response.defer()
+
+# --- 4. Discord Bot Setup ---
 class GachaBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -36,7 +72,7 @@ class GachaBot(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("Slash commands synced successfully!")
+        print("Slash commands synced!")
 
 client = GachaBot()
 
@@ -44,110 +80,67 @@ client = GachaBot()
 async def on_ready():
     print(f'Logged in as {client.user}!')
 
-# --- 4. Economy: Coins for Messages ---
+# --- 5. Automatic Economy ---
 @client.event
 async def on_message(message):
-    if message.author.bot:
-        return
-
-    # Give 1 to 5 random coins for every message
-    coins_earned = random.randint(1, 5)
-    
-    cursor.execute('''INSERT INTO users (id, balance) VALUES (?, ?) 
-                      ON CONFLICT(id) DO UPDATE SET balance = balance + ?''', 
-                   (str(message.author.id), coins_earned, coins_earned))
+    if message.author.bot: return
+    coins = random.randint(1, 5)
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), coins, coins))
     conn.commit()
 
-# --- 5. Part 1 Commands (Economy) ---
+# --- 6. Commands ---
+
 @client.tree.command(name="balance", description="Check your coin balance")
 async def balance(interaction: discord.Interaction):
-    await interaction.response.defer() # Tells Discord we are thinking
-    
     cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
     row = cursor.fetchone()
-    bal = row[0] if row else 0
-    
-    await interaction.followup.send(f"💰 You have **{bal}** coins!")
+    await interaction.response.send_message(f"💰 You have **{row[0] if row else 0}** coins!")
 
-@client.tree.command(name="addcoin", description="Admin: Add coins to a user")
-@app_commands.describe(user="The user to give coins to", amount="Amount of coins")
-async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
-    await interaction.response.defer(ephemeral=True)
-    
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.followup.send("❌ You don't have permission to do this.")
-        return
-
-    cursor.execute('''INSERT INTO users (id, balance) VALUES (?, ?) 
-                      ON CONFLICT(id) DO UPDATE SET balance = balance + ?''', 
-                   (str(user.id), amount, amount))
-    conn.commit()
-    
-    await interaction.followup.send(f"✅ Added **{amount}** coins to {user.mention}'s balance!")
-
-# --- 6. Part 2 Commands (Card Management) ---
-@client.tree.command(name="add_card", description="Admin: Add a new card to the system")
-@app_commands.describe(name="Name of the card", rarity="Rarity (e.g. Legendary)", value="Coin value", image_url="Link to the card image")
+@client.tree.command(name="add_card", description="Admin: Add a new card")
 async def add_card(interaction: discord.Interaction, name: str, rarity: str, value: int, image_url: str):
     await interaction.response.defer(ephemeral=True)
-    
     if not interaction.user.guild_permissions.manage_guild:
-        await interaction.followup.send("❌ Admin only!")
-        return
+        return await interaction.followup.send("❌ Admin only!")
 
-    try:
-        cursor.execute('''INSERT INTO cards (name, rarity, value, image) VALUES (?, ?, ?, ?)
-                          ON CONFLICT(name) DO UPDATE SET rarity=excluded.rarity, value=excluded.value, image=excluded.image''', 
-                       (name, rarity, value, image_url))
-        conn.commit()
-        await interaction.followup.send(f"✅ Card **{name}** ({rarity}) has been added/updated!")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}")
+    # Generate a unique 6-digit Card ID
+    while True:
+        new_id = random.randint(100000, 999999)
+        cursor.execute('SELECT 1 FROM cards WHERE card_id = ?', (new_id,))
+        if not cursor.fetchone(): break
 
-@client.tree.command(name="card_list", description="Admin: See all cards registered in the bot")
-async def card_list(interaction: discord.Interaction):
+    cursor.execute('INSERT INTO cards (card_id, name, rarity, value, image) VALUES (?, ?, ?, ?, ?)', 
+                   (new_id, name, rarity, value, image_url))
+    conn.commit()
+    await interaction.followup.send(f"✅ Card **{name}** added with ID: `{new_id}`")
+
+@client.tree.command(name="view_card", description="View a card by name or ID")
+@app_commands.describe(query="Enter the Card Name or 6-digit Card ID")
+async def view_card(interaction: discord.Interaction, query: str):
     await interaction.response.defer(ephemeral=True)
     
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.followup.send("❌ Admin only!")
-        return
-
-    cursor.execute('SELECT name, rarity, value FROM cards')
-    rows = cursor.fetchall()
+    # Get all cards to enable scrolling
+    cursor.execute('SELECT * FROM cards')
+    all_cards = cursor.fetchall()
     
-    if not rows:
-        await interaction.followup.send("The card database is currently empty.")
-        return
+    if not all_cards:
+        return await interaction.followup.send("❌ There are no cards in the database.")
 
-    list_text = "\n".join([f"• **{r[0]}** - {r[1]} (🪙 {r[2]})" for r in rows])
-    embed = discord.Embed(title="🗃️ Registered Cards", description=list_text, color=discord.Color.blue())
-    await interaction.followup.send(embed=embed)
-
-@client.tree.command(name="view_card", description="View details of a specific card")
-@app_commands.describe(name="The exact name of the card")
-async def view_card(interaction: discord.Interaction, name: str):
-    await interaction.response.defer(ephemeral=True) # Makes it so only the sender sees it
+    # Find the index of the card the user asked for
+    found_index = -1
+    for i, card in enumerate(all_cards):
+        # Check if query matches Name (card[1]) or ID (card[0])
+        if query.lower() == str(card[1]).lower() or query == str(card[0]):
+            found_index = i
+            break
     
-    cursor.execute('SELECT * FROM cards WHERE name = ?', (name,))
-    card = cursor.fetchone()
+    if found_index == -1:
+        return await interaction.followup.send(f"❌ Card '{query}' not found.")
 
-    if not card:
-        await interaction.followup.send(f"❌ Card '{name}' not found.")
-        return
+    view = CardPaginator(all_cards, found_index)
+    await interaction.followup.send(embed=view.create_embed(), view=view)
 
-    embed = discord.Embed(title=card[0], color=discord.Color.blue())
-    embed.add_field(name="Rarity", value=card[1], inline=True)
-    embed.add_field(name="Value", value=f"🪙 {card[2]}", inline=True)
-    embed.set_image(url=card[3])
-    
-    await interaction.followup.send(embed=embed)
-
-# --- 7. Run Everything ---
+# --- 7. Run ---
 if __name__ == '__main__':
     Thread(target=run_flask).start()
-    
-    token = os.environ.get('DISCORD_TOKEN')
-    if token:
-        client.run(token)
-    else:
-        print("No DISCORD_TOKEN found in environment variables!")
+    client.run(os.environ.get('DISCORD_TOKEN'))
+        
