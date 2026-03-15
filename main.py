@@ -218,6 +218,74 @@ async def inventory(interaction: discord.Interaction):
     view = CardPaginator(items, 0, "Your Collection")
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
+# --- 1. /addcoin (Admin) ---
+@client.tree.command(name="addcoin", description="Admin: Give coins to a user")
+async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.followup.send("❌ Admin only!")
+    
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', 
+                   (str(user.id), amount, amount))
+    conn.commit()
+    await interaction.followup.send(f"✅ Added **{amount}** coins to {user.mention}!")
+
+# --- 2. /view_card (Member) ---
+@client.tree.command(name="view_card", description="View details of a specific card")
+async def view_card(interaction: discord.Interaction, query: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    # Search by Name or ID
+    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (query, query))
+    card = cursor.fetchone()
+    if not card: 
+        return await interaction.followup.send("❌ Card not found.")
+    
+    # Use the Paginator logic to create a single premium embed without buttons
+    view = CardPaginator([card], 0, "Card Details")
+    await interaction.followup.send(embed=view.create_embed())
+
+# --- 3. /card_list (Admin) ---
+@client.tree.command(name="card_list", description="Admin: View all cards in the database")
+async def card_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.followup.send("❌ Admin only!")
+    
+    cursor.execute('SELECT * FROM cards')
+    cards = cursor.fetchall()
+    if not cards: 
+        return await interaction.followup.send("❌ Database is empty.")
+    
+    view = CardPaginator(cards, 0, "Global Card List")
+    await interaction.followup.send(embed=view.create_embed(), view=view)
+
+# --- 4. /inspect_inventory (Admin) ---
+@client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
+async def inspect_inventory(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.followup.send("❌ Admin only!")
+    
+    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(user.id),))
+    items = cursor.fetchall()
+    if not items: 
+        return await interaction.followup.send(f"❌ {user.name}'s inventory is empty.")
+    
+    view = CardPaginator(items, 0, f"{user.name}'s Collection")
+    await interaction.followup.send(embed=view.create_embed(), view=view)
+
+# --- 5. /rarity_list (Member) ---
+@client.tree.command(name="rarity_list", description="View rarity drop chances")
+async def rarity_list(interaction: discord.Interaction):
+    cursor.execute('SELECT name, chance FROM rarities ORDER BY chance DESC')
+    rows = cursor.fetchall()
+    desc = "\n".join([f"✨ **{r[0]}**: {r[1]}%" for r in rows])
+    
+    embed = discord.Embed(title="Rarity Tiers", description=desc, color=0xFFD700)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+
 if __name__ == '__main__':
     Thread(target=run_flask).start()
     client.run(os.environ.get('DISCORD_TOKEN'))
