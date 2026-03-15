@@ -139,6 +139,43 @@ async def view_card(interaction: discord.Interaction, query: str):
     view = CardPaginator(all_cards, found_index)
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
+# --- COMMAND: /addcoin (Admin Only) ---
+@client.tree.command(name="addcoin", description="Admin: Add coins to a user's balance")
+@app_commands.describe(user="The user to give coins to", amount="Amount of coins")
+async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
+    await interaction.response.defer(ephemeral=True)
+    
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+
+    cursor.execute('''INSERT INTO users (id, balance) VALUES (?, ?) 
+                      ON_CONFLICT(id) DO UPDATE SET balance = balance + ?''', 
+                   (str(user.id), amount, amount))
+    conn.commit()
+    await interaction.followup.send(f"✅ Successfully added **{amount}** coins to {user.mention}'s balance!")
+
+# --- COMMAND: /card_list (Admin Only) ---
+@client.tree.command(name="card_list", description="Admin: See all cards registered in the bot")
+async def card_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+
+    cursor.execute('SELECT card_id, name, rarity, value FROM cards')
+    rows = cursor.fetchall()
+    
+    if not rows:
+        return await interaction.followup.send("The card database is currently empty.")
+
+    # Organized list showing ID, Name, Rarity, and Value
+    list_text = "\n".join([f"`{r[0]}` | **{r[1]}** ({r[2]}) - 🪙 {r[3]}" for r in rows])
+    
+    # Using a simple embed for the admin list
+    embed = discord.Embed(title="Card list", description=list_text, color=discord.Color.blue())
+    await interaction.followup.send(embed=embed)
+    
+
 # --- 7. Run ---
 if __name__ == '__main__':
     Thread(target=run_flask).start()
