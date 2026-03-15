@@ -20,7 +20,7 @@ def run_flask():
 conn = sqlite3.connect('gacha.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Updated table to include card_id
+# Initialize all tables
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS cards (
                     card_id INTEGER PRIMARY KEY, 
@@ -28,10 +28,14 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS cards (
                     rarity TEXT, 
                     value INTEGER, 
                     image TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (
+                    user_id TEXT, 
+                    card_id INTEGER, 
+                    quantity INTEGER DEFAULT 1)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS rarities (name TEXT PRIMARY KEY, color TEXT)''')
 conn.commit()
 
-# --- 3. Pagination View for /view_card ---
+# --- 3. Premium Pagination for /card_list ---
 class CardPaginator(ui.View):
     def __init__(self, cards, start_index):
         super().__init__(timeout=60)
@@ -41,8 +45,17 @@ class CardPaginator(ui.View):
     def create_embed(self):
         card = self.cards[self.current_page]
         # card[0]=id, card[1]=name, card[2]=rarity, card[3]=value, card[4]=image
-        embed = discord.Embed(description=f"Page {self.current_page + 1}/{len(self.cards)}", color=discord.Color.gold())
-        embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** 🪙 {card[3]}\n**Card ID:** `{card[0]}`", inline=False)
+        
+        # Calculate owners
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card[0],))
+        owners_count = cursor.fetchone()[0]
+
+        embed = discord.Embed(description=f"**Page {self.current_page + 1}/{len(self.cards)}**", color=discord.Color.blue())
+        embed.add_field(
+            name=f"**{card[1]}**", 
+            value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`\n**Owners:** {owners_count} 👥", 
+            inline=False
+        )
         embed.set_image(url=card[4])
         return embed
 
@@ -72,7 +85,7 @@ class GachaBot(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("Slash commands synced!")
+        print("Slash commands synced successfully!")
 
 client = GachaBot()
 
@@ -80,29 +93,42 @@ client = GachaBot()
 async def on_ready():
     print(f'Logged in as {client.user}!')
 
-# --- 5. Automatic Economy ---
+# --- 5. Economy: Coins for Messages ---
 @client.event
 async def on_message(message):
     if message.author.bot: return
-    coins = random.randint(1, 5)
-    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), coins, coins))
+    coins_earned = random.randint(1, 5)
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', 
+                   (str(message.author.id), coins_earned, coins_earned))
     conn.commit()
 
-# --- 6. Commands ---
+# --- 6. Commands (Parts 1 & 2 Complete) ---
 
 @client.tree.command(name="balance", description="Check your coin balance")
 async def balance(interaction: discord.Interaction):
+    await interaction.response.defer()
     cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
     row = cursor.fetchone()
-    await interaction.response.send_message(f"💰 You have **{row[0] if row else 0}** coins!")
+    bal = row[0] if row else 0
+    await interaction.followup.send(f"💰 You have **{bal}** coins!")
+
+@client.tree.command(name="addcoin", description="Admin: Add coins to a user")
+async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', 
+                   (str(user.id), amount, amount))
+    conn.commit()
+    await interaction.followup.send(f"✅ Added **{amount}** coins to {user.mention}!")
 
 @client.tree.command(name="add_card", description="Admin: Add a new card")
 async def add_card(interaction: discord.Interaction, name: str, rarity: str, value: int, image_url: str):
     await interaction.response.defer(ephemeral=True)
     if not interaction.user.guild_permissions.manage_guild:
         return await interaction.followup.send("❌ Admin only!")
-
-    # Generate a unique 6-digit Card ID
+    
+    # Generate Unique 6-digit ID
     while True:
         new_id = random.randint(100000, 999999)
         cursor.execute('SELECT 1 FROM cards WHERE card_id = ?', (new_id,))
@@ -113,71 +139,47 @@ async def add_card(interaction: discord.Interaction, name: str, rarity: str, val
     conn.commit()
     await interaction.followup.send(f"✅ Card **{name}** added with ID: `{new_id}`")
 
+@client.tree.command(name="card_list", description="Admin: See all registered cards")
+async def card_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+
+    cursor.execute('SELECT * FROM cards')
+    all_cards = cursor.fetchall()
+    if not all_cards:
+        return await interaction.followup.send("❌ Database is empty.")
+
+    view = CardPaginator(all_cards, 0)
+    await interaction.followup.send(embed=view.create_embed(), view=view)
+
 @client.tree.command(name="view_card", description="View a card by name or ID")
-@app_commands.describe(query="Enter the Card Name or 6-digit Card ID")
 async def view_card(interaction: discord.Interaction, query: str):
     await interaction.response.defer(ephemeral=True)
     
-    # Get all cards to enable scrolling
-    cursor.execute('SELECT * FROM cards')
-    all_cards = cursor.fetchall()
-    
-    if not all_cards:
-        return await interaction.followup.send("❌ There are no cards in the database.")
-
-    # Find the index of the card the user asked for
-    found_index = -1
-    for i, card in enumerate(all_cards):
-        # Check if query matches Name (card[1]) or ID (card[0])
-        if query.lower() == str(card[1]).lower() or query == str(card[0]):
-            found_index = i
-            break
-    
-    if found_index == -1:
+    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (query, query))
+    card = cursor.fetchone()
+    if not card:
         return await interaction.followup.send(f"❌ Card '{query}' not found.")
 
-    view = CardPaginator(all_cards, found_index)
-    await interaction.followup.send(embed=view.create_embed(), view=view)
+    cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card[0],))
+    owners_count = cursor.fetchone()[0]
 
-# --- COMMAND: /addcoin (Admin Only) ---
-@client.tree.command(name="addcoin", description="Admin: Add coins to a user's balance")
-@app_commands.describe(user="The user to give coins to", amount="Amount of coins")
-async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
-    await interaction.response.defer(ephemeral=True)
-    
-    if not interaction.user.guild_permissions.manage_guild:
-        return await interaction.followup.send("❌ Admin only!")
-
-    cursor.execute('''INSERT INTO users (id, balance) VALUES (?, ?) 
-                      ON_CONFLICT(id) DO UPDATE SET balance = balance + ?''', 
-                   (str(user.id), amount, amount))
-    conn.commit()
-    await interaction.followup.send(f"✅ Successfully added **{amount}** coins to {user.mention}'s balance!")
-
-# --- COMMAND: /card_list (Admin Only) ---
-@client.tree.command(name="card_list", description="Admin: See all cards registered in the bot")
-async def card_list(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    
-    if not interaction.user.guild_permissions.manage_guild:
-        return await interaction.followup.send("❌ Admin only!")
-
-    cursor.execute('SELECT card_id, name, rarity, value FROM cards')
-    rows = cursor.fetchall()
-    
-    if not rows:
-        return await interaction.followup.send("The card database is currently empty.")
-
-    # Organized list showing ID, Name, Rarity, and Value
-    list_text = "\n".join([f"`{r[0]}` | **{r[1]}** ({r[2]}) - 🪙 {r[3]}" for r in rows])
-    
-    # Using a simple embed for the admin list
-    embed = discord.Embed(title="Card list", description=list_text, color=discord.Color.blue())
+    embed = discord.Embed(color=discord.Color.blue())
+    embed.add_field(
+        name=f"**{card[1]}**", 
+        value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`\n**Owners:** {owners_count} 👥", 
+        inline=False
+    )
+    embed.set_image(url=card[4])
     await interaction.followup.send(embed=embed)
-    
 
-# --- 7. Run ---
+# --- 7. Run Bot ---
 if __name__ == '__main__':
     Thread(target=run_flask).start()
-    client.run(os.environ.get('DISCORD_TOKEN'))
+    token = os.environ.get('DISCORD_TOKEN')
+    if token:
+        client.run(token)
+    else:
+        print("No DISCORD_TOKEN found!")
         
