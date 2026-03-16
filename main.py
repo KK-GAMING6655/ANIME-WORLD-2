@@ -42,6 +42,15 @@ def init_db():
 
 init_db()
 
+   # Add this line right below your inventory table creation
+    cursor.execute('''CREATE TABLE IF NOT EXISTS market (
+                        selling_id INTEGER PRIMARY KEY, 
+                        seller_id TEXT, 
+                        card_id INTEGER, 
+                        price INTEGER, 
+                        quantity INTEGER)''')
+
+
 # --- 3. UTILITY FUNCTIONS ---
 
 RARITY_ORDER = {
@@ -268,6 +277,126 @@ class TradeView(ui.View):
         self.stop()
         await interaction.response.edit_message(content="❌ Trade cancelled.", view=None)
                          
+class MarketPaginator(ui.View):
+    def __init__(self, listings, client):
+        super().__init__(timeout=120)
+        self.listings = listings
+        self.current_page = 0
+        self.client = client
+        
+        # Hide confirm/cancel buttons initially
+        self.remove_item(self.btn_confirm)
+        self.remove_item(self.btn_cancel)
+
+    async def create_embed(self):
+        item = self.listings[self.current_page]
+        # item: (selling_id, seller_id, price, qty, card_id, name, rarity, value, image)
+        selling_id, seller_id, price, qty = item[0], item[1], item[2], item[3]
+        card_id, name, rarity, value, image = item[4], item[5], item[6], item[7], item[8]
+        total_amount = price * qty
+
+        cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
+        res = cursor.fetchone()
+        color = int(res[0], 16) if res else 0x3498db
+
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
+        owners = cursor.fetchone()[0]
+
+        seller = self.client.get_user(int(seller_id))
+        seller_name = seller.name if seller else "Unknown User"
+
+        embed = discord.Embed(title="🛒 Global Market", color=color)
+        embed.description = f"**Page {self.current_page + 1} of {len(self.listings)}**"
+        embed.add_field(name=f"**{name}**", value=(
+            f"**Rarity:** {rarity}\n"
+            f"**Value:** {value} 🪙\n"
+            f"**Owners:** {owners} 👥\n"
+            f"**Selling Amount:** {price} 🪙\n"
+            f"**Quantity:** {qty}\n"
+            f"**Total Amount:** {total_amount} 🪙\n"
+            f"**Seller:** {seller_name}\n"
+            f"**Card ID:** `{card_id}`"
+        ), inline=False)
+        embed.set_image(url=image)
+        embed.set_footer(text=f"Selling ID: {selling_id}")
+        return embed
+
+    @ui.button(label="⬅️", style=discord.ButtonStyle.grey, custom_id="prev")
+    async def btn_prev(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=await self.create_embed(), view=self)
+        else: await interaction.response.defer()
+
+    @ui.button(label="Buy", style=discord.ButtonStyle.green, custom_id="buy")
+    async def btn_buy(self, interaction: discord.Interaction, button: ui.Button):
+        # Swap buttons
+        self.remove_item(self.btn_prev)
+        self.remove_item(self.btn_buy)
+        self.remove_item(self.btn_next)
+        self.add_item(self.btn_confirm)
+        self.add_item(self.btn_cancel)
+        await interaction.response.edit_message(view=self)
+
+    @ui.button(label="➡️", style=discord.ButtonStyle.grey, custom_id="next")
+    async def btn_next(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page < len(self.listings) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=await self.create_embed(), view=self)
+        else: await interaction.response.defer()
+
+    @ui.button(label="Confirm", style=discord.ButtonStyle.green, custom_id="confirm")
+    async def btn_confirm(self, interaction: discord.Interaction, button: ui.Button):
+        item = self.listings[self.current_page]
+        selling_id, seller_id, price, qty = item[0], item[1], item[2], item[3]
+        card_id, name, rarity, value, image = item[4], item[5], item[6], item[7], item[8]
+        total_amount = price * qty
+
+        # Check if the item is still in the database (someone else might have bought it!)
+        cursor.execute('SELECT * FROM market WHERE selling_id = ?', (selling_id,))
+        if not cursor.fetchone():
+            await interaction.message.delete()
+            return await interaction.response.send_message(embed=discord.Embed(description="⚠️ This item was already sold or removed!", color=discord.Color.red()), ephemeral=True)
+
+        if str(interaction.user.id) == str(seller_id):
+            return await interaction.response.send_message(embed=discord.Embed(description="⚠️ You cannot buy your own listing!", color=discord.Color.red()), ephemeral=True)
+
+        # Check buyer balance
+        cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+        row = cursor.fetchone()
+        balance = row[0] if row else 0
+
+        if balance < total_amount:
+            await interaction.message.delete()
+            err_embed = discord.Embed(description=f"{interaction.user.mention}, you don't have enough balance to buy that item.\n**Your balance:** {balance} 🪙", color=discord.Color.red())
+            return await interaction.response.send_message(embed=err_embed, ephemeral=True)
+
+        # Process Transaction
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (total_amount, str(interaction.user.id)))
+        cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(seller_id), total_amount, total_amount))
+        cursor.execute('DELETE FROM market WHERE selling_id = ?', (selling_id,))
+        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(interaction.user.id), card_id, qty, qty))
+        conn.commit()
+
+        await interaction.message.delete()
+
+        # Public Success Announcement
+        pub_embed = discord.Embed(description=f"🎉 {interaction.user.mention} bought **{name} ({rarity})** from the market for **{total_amount}** 🪙.", color=discord.Color.green())
+        pub_embed.add_field(name="Card Details", value=f"**Card Name:** {name}\n**Rarity:** {rarity}\n**Value:** {value}\n**Card Id:** `{card_id}`\n**Quantity:** {qty}\n**Amount:** {total_amount} 🪙", inline=False)
+        pub_embed.set_image(url=image)
+        await interaction.channel.send(embed=pub_embed)
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.red, custom_id="cancel")
+    async def btn_cancel(self, interaction: discord.Interaction, button: ui.Button):
+        # Swap back to normal buttons
+        self.remove_item(self.btn_confirm)
+        self.remove_item(self.btn_cancel)
+        self.add_item(self.btn_prev)
+        self.add_item(self.btn_buy)
+        self.add_item(self.btn_next)
+        await interaction.response.edit_message(view=self)
+        
+
 
 # --- 5. BOT SETUP ---
 class GachaBot(discord.Client):
@@ -495,6 +624,81 @@ async def card_list(interaction: discord.Interaction):
     view = CardPaginator(sorted_cards, 0, "Global List")
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
+# --- MARKET SYSTEM COMMANDS ---
+
+@client.tree.command(name="market_sell", description="Sell a card in the global market")
+async def market_sell(interaction: discord.Interaction, name: str, amount: int, quantity: int):
+    await interaction.response.defer(ephemeral=True)
+    
+    # Check if user owns the card and quantity
+    cursor.execute('''SELECT c.card_id, i.quantity, c.name FROM inventory i 
+                      JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(interaction.user.id), name, name))
+    card = cursor.fetchone()
+
+    if not card:
+        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ you don't have that card in your inventory!", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+    
+    if card[1] < quantity:
+        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ you don't have that much card in your inventory!", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+
+    # Generate unique 6-digit selling ID
+    while True:
+        selling_id = random.randint(100000, 999999)
+        cursor.execute('SELECT 1 FROM market WHERE selling_id = ?', (selling_id,))
+        if not cursor.fetchone(): break
+
+    # Remove cards from inventory and add to market
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(interaction.user.id), card[0]))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+    cursor.execute('INSERT INTO market (selling_id, seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?, ?)', (selling_id, str(interaction.user.id), card[0], amount, quantity))
+    conn.commit()
+
+    success_embed = discord.Embed(description=f"✅ Successfully listed **{quantity}x {card[2]}** on the market for **{amount} 🪙** each!\nSelling ID: `{selling_id}`", color=discord.Color.green())
+    await interaction.followup.send(embed=success_embed)
+
+@client.tree.command(name="market", description="Browse the global card market")
+async def market(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True) # Only the user can see it!
+    
+    cursor.execute('''SELECT m.selling_id, m.seller_id, m.price, m.quantity, 
+                             c.card_id, c.name, c.rarity, c.value, c.image 
+                      FROM market m JOIN cards c ON m.card_id = c.card_id''')
+    listings = cursor.fetchall()
+
+    if not listings:
+        return await interaction.followup.send(embed=discord.Embed(description="🛒 The market is currently empty!", color=discord.Color.orange()))
+
+    view = MarketPaginator(listings, client)
+    await interaction.followup.send(embed=await view.create_embed(), view=view)
+
+@client.tree.command(name="remove_market", description="Remove your card from the market")
+async def remove_market(interaction: discord.Interaction, id: int):
+    await interaction.response.defer(ephemeral=True)
+
+    cursor.execute('''SELECT m.seller_id, m.card_id, m.quantity, c.name FROM market m 
+                      JOIN cards c ON m.card_id = c.card_id WHERE m.selling_id = ?''', (id,))
+    listing = cursor.fetchone()
+
+    if not listing:
+        return await interaction.followup.send(embed=discord.Embed(description="⚠️ Market listing not found. Double-check the Selling ID.", color=discord.Color.red()))
+
+    seller_id, card_id, qty, card_name = listing[0], listing[1], listing[2], listing[3]
+
+    if str(interaction.user.id) != str(seller_id):
+        err_embed = discord.Embed(description=f"{interaction.user.mention}, You can't remove someone else's card.", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+
+    # Return cards to inventory and remove from market
+    cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(interaction.user.id), card_id, qty, qty))
+    cursor.execute('DELETE FROM market WHERE selling_id = ?', (id,))
+    conn.commit()
+
+    success_embed = discord.Embed(description=f"{interaction.user.mention}, Successfully removed **{card_name}** from the market. The cards have been returned to your inventory.", color=discord.Color.green())
+    await interaction.followup.send(embed=success_embed)
+    
 
 
 if __name__ == '__main__':
