@@ -44,6 +44,16 @@ init_db()
 
 # --- 3. UTILITY FUNCTIONS ---
 
+RARITY_ORDER = {
+    'Common': 1, 
+    'Uncommon': 2, 
+    'Rare': 3, 
+    'Epic': 4, 
+    'Legendary': 5, 
+    'Super Legendary': 6
+}
+
+
 def get_user_stats(user_id):
     """Calculates rarity counts and total points for a user."""
     cursor.execute('''SELECT c.rarity, SUM(i.quantity) FROM inventory i 
@@ -71,6 +81,8 @@ def get_all_leaderboard_data():
 
 # --- 4. PREMIUM UI PAGINATORS ---
 
+# --- 4. UI CLASSES ---
+
 class CardPaginator(ui.View):
     def __init__(self, cards, start_index, title_prefix="Card"):
         super().__init__(timeout=60)
@@ -81,17 +93,19 @@ class CardPaginator(ui.View):
     def create_embed(self):
         card = self.cards[self.current_page]
         card_id, name, rarity, value, image = card[0], card[1], card[2], card[3], card[4]
-        
+        quantity = card[5] if len(card) > 5 else "N/A"
+
         cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
         res = cursor.fetchone()
         color = int(res[0], 16) if res else 0x3498db
-        
-        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
-        owners = cursor.fetchone()[0]
 
         embed = discord.Embed(title=f"{self.title_prefix}", color=color)
-        embed.description = f"**Page {self.current_page + 1}/{len(self.cards)}**"
-        embed.add_field(name=f"**{name}**", value=f"**Rarity:** {rarity}\n**Value:** {value} 🪙\n**Card ID:** `{card_id}`\n**Owners:** {owners} 👥", inline=False)
+        embed.add_field(name=f"**{name}**", value=(
+            f"**Rarity:** {rarity}\n"
+            f"**Value:** {value} 🪙\n"
+            f"**Quantity:** {quantity}\n"
+            f"**Card ID:** `{card_id}`"
+        ), inline=False)
         embed.set_image(url=image)
         return embed
 
@@ -108,6 +122,59 @@ class CardPaginator(ui.View):
             self.current_page += 1
             await interaction.response.edit_message(embed=self.create_embed(), view=self)
         else: await interaction.response.defer()
+
+# NEW: DropView for public claims
+class DropView(ui.View):
+    def __init__(self, card, quantity):
+        super().__init__(timeout=None)
+        self.card = card
+        self.remaining = quantity
+
+    @ui.button(label="Get", style=discord.ButtonStyle.green)
+    async def get_card(self, interaction: discord.Interaction, button: ui.Button):
+        if self.remaining <= 0:
+            return await interaction.response.send_message("All cards claimed!", ephemeral=True)
+        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(interaction.user.id), self.card[0]))
+        conn.commit()
+        self.remaining -= 1
+        if self.remaining <= 0:
+            button.disabled, button.label = True, "Claimed Out"
+            await interaction.message.edit(view=self)
+        else:
+            embed = interaction.message.embeds[0]
+            embed.set_field_at(0, name=embed.fields[0].name, value=f"**Rarity:** {self.card[2]}\n**Value:** {self.card[3]} 🪙\n**Quantity Remaining:** {self.remaining}", inline=False)
+            await interaction.message.edit(embed=embed, view=self)
+        await interaction.response.send_message(f"✅ Claimed **{self.card[1]}**!", ephemeral=True)
+
+# NEW: SaleView for DM trading
+class SaleView(ui.View):
+    def __init__(self, seller, buyer, card, price, quantity):
+        super().__init__(timeout=3600)
+        self.seller, self.buyer, self.card, self.price, self.qty = seller, buyer, card, price, quantity
+
+    @ui.button(label="✅ Accept", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: ui.Button):
+        total = self.price * self.qty
+        cursor.execute('SELECT balance FROM users WHERE id = ?', (str(self.buyer.id),))
+        row = cursor.fetchone()
+        if not row or row[0] < total:
+            return await interaction.response.send_message(f"❌ Low balance! Need {total} 🪙", ephemeral=True)
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (total, str(self.buyer.id)))
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (total, str(self.seller.id)))
+        cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (self.qty, str(self.seller.id), self.card[0]))
+        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(self.buyer.id), self.card[0], self.qty, self.qty))
+        cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+        conn.commit()
+        await interaction.response.send_message(f"✅ Bought {self.qty}x {self.card[1]}!")
+        await self.seller.send(f"💰 {self.buyer.name} bought your cards for {total} 🪙!")
+        self.stop()
+
+    @ui.button(label="❌ Deny", style=discord.ButtonStyle.red)
+    async def deny(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_message("Trade declined.")
+        await self.seller.send(f"❌ {self.buyer.name} declined the offer.")
+        self.stop()
+
 
 class UserLeaderboardPaginator(ui.View):
     def __init__(self, data, start_index, client):
@@ -291,20 +358,7 @@ async def view_card(interaction: discord.Interaction, query: str):
     view = CardPaginator([card], 0, "Card Details")
     await interaction.followup.send(embed=view.create_embed())
 
-# --- 3. /card_list (Admin) ---
-@client.tree.command(name="card_list", description="Admin: View all cards in the database")
-async def card_list(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.followup.send("❌ Admin only!")
-    
-    cursor.execute('SELECT * FROM cards')
-    cards = cursor.fetchall()
-    if not cards: 
-        return await interaction.followup.send("❌ Database is empty.")
-    
-    view = CardPaginator(cards, 0, "Global Card List")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
+
 
 # --- 4. /inspect_inventory (Admin) ---
 @client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
@@ -357,7 +411,7 @@ async def gacha(interaction: discord.Interaction):
     # Pick a random card from that rarity
     cursor.execute('SELECT * FROM cards WHERE rarity = ? ORDER BY RANDOM() LIMIT 1', (chosen_rarity,))
     card = cursor.fetchone()
-    
+
     if not card:
         # Fallback if an admin created a rarity but added no cards to it
         return await interaction.followup.send("⚠️ The gacha machine malfunctioned! (No cards found for this rarity). Your coins were refunded.")
@@ -380,55 +434,48 @@ async def gacha(interaction: discord.Interaction):
     
     await interaction.followup.send(content=f"{interaction.user.mention} pulled a card!", embed=embed)
 
-# --- 2. /drop (Admin) ---
-@client.tree.command(name="drop", description="Admin: Force drop a specific card for a user")
-async def drop(interaction: discord.Interaction, user: discord.Member, card_query: str):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild:
-        return await interaction.followup.send("❌ Admin only!")
+# --- 6. COMMANDS (REPLACEMENTS) ---
 
-    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (card_query, card_query))
+@client.tree.command(name="drop", description="Admin: Public card drop")
+async def drop(interaction: discord.Interaction, name: str, quantity: int):
+    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!")
+    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (name, name))
     card = cursor.fetchone()
-    if not card:
-        return await interaction.followup.send(f"❌ Card '{card_query}' not found.")
+    if not card: return await interaction.response.send_message("Card not found!")
+    embed = discord.Embed(title="🎁 PUBLIC DROP!", color=discord.Color.gold())
+    embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Quantity Remaining:** {quantity}", inline=False)
+    embed.set_image(url=card[4])
+    await interaction.channel.send(embed=embed, view=DropView(card, quantity))
+    await interaction.response.send_message("Drop sent!", ephemeral=True)
 
-    cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) 
-                      ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', (str(user.id), card[0]))
-    conn.commit()
-    await interaction.followup.send(f"✅ Successfully dropped **{card[1]}** into {user.mention}'s inventory!")
+@client.tree.command(name="trade", description="Sell cards for coins via DM")
+async def trade(interaction: discord.Interaction, user: discord.Member, card_name_or_id: str, trade_amount: int, quantity: int):
+    await interaction.response.defer(ephemeral=True)
+    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)', (str(interaction.user.id), card_name_or_id, card_name_or_id))
+    card = cursor.fetchone()
+    if not card or card[5] < quantity: return await interaction.followup.send("❌ You don't have enough copies!")
+    embed = discord.Embed(title="🤝 Trade Offer", color=discord.Color.blue())
+    embed.add_field(name="Details", value=f"**Seller:** {interaction.user.name}\n**Card:** {card[1]}\n**Qty:** {quantity}\n**Total:** {trade_amount * quantity} 🪙")
+    embed.set_image(url=card[4])
+    try:
+        await user.send(embed=embed, view=SaleView(interaction.user, user, card, trade_amount, quantity))
+        await interaction.followup.send(f"✅ Offer sent to {user.name}!")
+    except: await interaction.followup.send("❌ User has DMs closed!")
 
-# --- 3. /trade (Member) ---
-@client.tree.command(name="trade", description="Trade a card with another user")
-async def trade(interaction: discord.Interaction, target_user: discord.Member, your_card: str, their_card: str):
-    if target_user.id == interaction.user.id:
-        return await interaction.response.send_message("You can't trade with yourself!", ephemeral=True)
+@client.tree.command(name="card_list", description="Admin: Sorted card list")
+async def card_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild: return await interaction.followup.send("❌ Admin!")
+    cursor.execute('SELECT * FROM cards')
+    cards = cursor.fetchall()
+    sorted_cards = sorted(cards, key=lambda x: RARITY_ORDER.get(x[2], 99))
+    view = CardPaginator(sorted_cards, 0, "Global List")
+    await interaction.followup.send(embed=view.create_embed(), view=view)
 
-    await interaction.response.defer()
-
-    # Verify Sender owns their card
-    cursor.execute('''SELECT c.card_id, c.name FROM inventory i JOIN cards c ON i.card_id = c.card_id 
-                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(interaction.user.id), your_card, your_card))
-    s_card = cursor.fetchone()
-    
-    # Verify Receiver owns their card
-    cursor.execute('''SELECT c.card_id, c.name FROM inventory i JOIN cards c ON i.card_id = c.card_id 
-                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(target_user.id), their_card, their_card))
-    r_card = cursor.fetchone()
-
-    if not s_card: return await interaction.followup.send(f"❌ You don't own **{your_card}**!")
-    if not r_card: return await interaction.followup.send(f"❌ {target_user.name} doesn't own **{their_card}**!")
-
-    view = TradeView(interaction.user, target_user, s_card, r_card)
-    embed = discord.Embed(title="🤝 Trade Proposal", color=discord.Color.blue())
-    embed.add_field(name=f"{interaction.user.name} offers:", value=f"**{s_card[1]}** (ID: {s_card[0]})", inline=True)
-    embed.add_field(name=f"{target_user.name} offers:", value=f"**{r_card[1]}** (ID: {r_card[0]})", inline=True)
-    embed.set_footer(text=f"{target_user.name}, click below to confirm.")
-    
-    await interaction.followup.send(content=f"{target_user.mention}, you have a trade request!", embed=embed, view=view)
-    
 
 
 if __name__ == '__main__':
     Thread(target=run_flask).start()
     client.run(os.environ.get('DISCORD_TOKEN'))
-        
+
+    
