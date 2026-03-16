@@ -324,6 +324,102 @@ async def rarity_list(interaction: discord.Interaction):
     embed = discord.Embed(title="Rarity Tiers", description=desc, color=0xFFD700)
     await interaction.response.send_message(embed=embed, ephemeral=True)
         
+# --- 1. /gacha (Member) ---
+@client.tree.command(name="gacha", description="Spend 50 coins to pull a random card")
+async def gacha(interaction: discord.Interaction):
+    await interaction.response.defer()
+    cost = 50
+    
+    # Check balance
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    row = cursor.fetchone()
+    if not row or row[0] < cost:
+        return await interaction.followup.send(f"❌ You need **{cost}** coins to pull! Chat more to earn coins.")
+
+    # Deduct coins
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (cost, str(interaction.user.id)))
+    
+    # Weighted Random Rarity
+    cursor.execute('SELECT name, chance FROM rarities')
+    rarity_data = cursor.fetchall() # List of ('Common', 50.0), etc.
+    rarities = [r[0] for r in rarity_data]
+    weights = [r[1] for r in rarity_data]
+    
+    chosen_rarity = random.choices(rarities, weights=weights, k=1)[0]
+    
+    # Pick a random card from that rarity
+    cursor.execute('SELECT * FROM cards WHERE rarity = ? ORDER BY RANDOM() LIMIT 1', (chosen_rarity,))
+    card = cursor.fetchone()
+    
+    if not card:
+        # Fallback if an admin created a rarity but added no cards to it
+        return await interaction.followup.send("⚠️ The gacha machine malfunctioned! (No cards found for this rarity). Your coins were refunded.")
+
+    # Give card to user
+    cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) 
+                      ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', (str(interaction.user.id), card[0]))
+    conn.commit()
+
+    # Premium Reveal Embed
+    # Use the logic from your CardPaginator to match style
+    cursor.execute('SELECT color FROM rarities WHERE name = ?', (card[2],))
+    color_res = cursor.fetchone()
+    embed_color = int(color_res[0], 16) if color_res else 0x3498db
+
+    embed = discord.Embed(title="✨ GACHA PULL ✨", color=embed_color)
+    embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`", inline=False)
+    embed.set_image(url=card[4])
+    embed.set_footer(text=f"Remaining Balance: {row[0] - cost} 🪙")
+    
+    await interaction.followup.send(content=f"{interaction.user.mention} pulled a card!", embed=embed)
+
+# --- 2. /drop (Admin) ---
+@client.tree.command(name="drop", description="Admin: Force drop a specific card for a user")
+async def drop(interaction: discord.Interaction, user: discord.Member, card_query: str):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild:
+        return await interaction.followup.send("❌ Admin only!")
+
+    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (card_query, card_query))
+    card = cursor.fetchone()
+    if not card:
+        return await interaction.followup.send(f"❌ Card '{card_query}' not found.")
+
+    cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) 
+                      ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', (str(user.id), card[0]))
+    conn.commit()
+    await interaction.followup.send(f"✅ Successfully dropped **{card[1]}** into {user.mention}'s inventory!")
+
+# --- 3. /trade (Member) ---
+@client.tree.command(name="trade", description="Trade a card with another user")
+async def trade(interaction: discord.Interaction, target_user: discord.Member, your_card: str, their_card: str):
+    if target_user.id == interaction.user.id:
+        return await interaction.response.send_message("You can't trade with yourself!", ephemeral=True)
+
+    await interaction.response.defer()
+
+    # Verify Sender owns their card
+    cursor.execute('''SELECT c.card_id, c.name FROM inventory i JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(interaction.user.id), your_card, your_card))
+    s_card = cursor.fetchone()
+    
+    # Verify Receiver owns their card
+    cursor.execute('''SELECT c.card_id, c.name FROM inventory i JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(target_user.id), their_card, their_card))
+    r_card = cursor.fetchone()
+
+    if not s_card: return await interaction.followup.send(f"❌ You don't own **{your_card}**!")
+    if not r_card: return await interaction.followup.send(f"❌ {target_user.name} doesn't own **{their_card}**!")
+
+    view = TradeView(interaction.user, target_user, s_card, r_card)
+    embed = discord.Embed(title="🤝 Trade Proposal", color=discord.Color.blue())
+    embed.add_field(name=f"{interaction.user.name} offers:", value=f"**{s_card[1]}** (ID: {s_card[0]})", inline=True)
+    embed.add_field(name=f"{target_user.name} offers:", value=f"**{r_card[1]}** (ID: {r_card[0]})", inline=True)
+    embed.set_footer(text=f"{target_user.name}, click below to confirm.")
+    
+    await interaction.followup.send(content=f"{target_user.mention}, you have a trade request!", embed=embed, view=view)
+    
+
 
 if __name__ == '__main__':
     Thread(target=run_flask).start()
