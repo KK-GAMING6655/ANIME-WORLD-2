@@ -40,9 +40,7 @@ def init_db():
         cursor.execute('INSERT OR IGNORE INTO rarities (name, color, chance) VALUES (?, ?, ?)', (name, color, chance))
     conn.commit()
 
-init_db()
-
-   # Add this line right below your inventory table creation
+    # Add this line right below your inventory table creation
     cursor.execute('''CREATE TABLE IF NOT EXISTS market (
                         selling_id INTEGER PRIMARY KEY, 
                         seller_id TEXT, 
@@ -50,6 +48,8 @@ init_db()
                         price INTEGER, 
                         quantity INTEGER)''')
 
+
+init_db()
 
 # --- 3. UTILITY FUNCTIONS ---
 
