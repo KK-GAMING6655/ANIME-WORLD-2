@@ -83,6 +83,7 @@ def get_all_leaderboard_data():
 
 # --- 4. UI CLASSES ---
 
+
 class CardPaginator(ui.View):
     def __init__(self, cards, start_index, title_prefix="Card"):
         super().__init__(timeout=60)
@@ -92,20 +93,28 @@ class CardPaginator(ui.View):
 
     def create_embed(self):
         card = self.cards[self.current_page]
+        # card structure: (id, name, rarity, value, image)
         card_id, name, rarity, value, image = card[0], card[1], card[2], card[3], card[4]
-        quantity = card[5] if len(card) > 5 else "N/A"
-
+        
         cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
         res = cursor.fetchone()
         color = int(res[0], 16) if res else 0x3498db
 
         embed = discord.Embed(title=f"{self.title_prefix}", color=color)
-        embed.add_field(name=f"**{name}**", value=(
-            f"**Rarity:** {rarity}\n"
-            f"**Value:** {value} 🪙\n"
-            f"**Quantity:** {quantity}\n"
-            f"**Card ID:** `{card_id}`"
-        ), inline=False)
+        
+        # ADDED: Clear Page numbering at the top
+        embed.description = f"**Page {self.current_page + 1} of {len(self.cards)}**"
+
+        # LOGIC: Show Quantity for inventories, Owners for global lists
+        if "Collection" in self.title_prefix or "Inventory" in self.title_prefix:
+            qty = card[5] if len(card) > 5 else 1
+            info_text = f"**Rarity:** {rarity}\n**Value:** {value} 🪙\n**Quantity:** x{qty}\n**Card ID:** `{card_id}`"
+        else:
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
+            owners_count = cursor.fetchone()[0]
+            info_text = f"**Rarity:** {rarity}\n**Value:** {value} 🪙\n**Owners:** {owners_count} 👥\n**Card ID:** `{card_id}`"
+
+        embed.add_field(name=f"**{name}**", value=info_text, inline=False)
         embed.set_image(url=image)
         return embed
 
@@ -123,7 +132,6 @@ class CardPaginator(ui.View):
             await interaction.response.edit_message(embed=self.create_embed(), view=self)
         else: await interaction.response.defer()
 
-# NEW: DropView for public claims
 class DropView(ui.View):
     def __init__(self, card, quantity):
         super().__init__(timeout=None)
@@ -134,9 +142,19 @@ class DropView(ui.View):
     async def get_card(self, interaction: discord.Interaction, button: ui.Button):
         if self.remaining <= 0:
             return await interaction.response.send_message("All cards claimed!", ephemeral=True)
+        
         cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(interaction.user.id), self.card[0]))
         conn.commit()
+        
         self.remaining -= 1
+        
+        # ADDED: Congratulations message in the channel
+        congrats_embed = discord.Embed(
+            description=f"Congratulations 🎉 {interaction.user.mention} won **{self.card[1]} ({self.card[2]})** from the drop!",
+            color=0xFFFF00 # Yellow
+        )
+        await interaction.channel.send(embed=congrats_embed)
+
         if self.remaining <= 0:
             button.disabled, button.label = True, "Claimed Out"
             await interaction.message.edit(view=self)
@@ -144,7 +162,9 @@ class DropView(ui.View):
             embed = interaction.message.embeds[0]
             embed.set_field_at(0, name=embed.fields[0].name, value=f"**Rarity:** {self.card[2]}\n**Value:** {self.card[3]} 🪙\n**Quantity Remaining:** {self.remaining}", inline=False)
             await interaction.message.edit(embed=embed, view=self)
-        await interaction.response.send_message(f"✅ Claimed **{self.card[1]}**!", ephemeral=True)
+        
+        await interaction.response.defer()
+
 
 # NEW: SaleView for DM trading
 class SaleView(ui.View):
@@ -376,14 +396,17 @@ async def inspect_inventory(interaction: discord.Interaction, user: discord.Memb
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
 # --- 5. /rarity_list (Member) ---
-@client.tree.command(name="rarity_list", description="View rarity drop chances")
+
+@client.tree.command(name="rarity_list", description="View rarity drop chances (Public)")
 async def rarity_list(interaction: discord.Interaction):
+    # Removed ephemeral=True so it is visible to all
     cursor.execute('SELECT name, chance FROM rarities ORDER BY chance DESC')
     rows = cursor.fetchall()
     desc = "\n".join([f"✨ **{r[0]}**: {r[1]}%" for r in rows])
     
-    embed = discord.Embed(title="Rarity Tiers", description=desc, color=0xFFD700)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    embed = discord.Embed(title="Rarity Tiers & Drop Chances", description=desc, color=0xFFD700)
+    await interaction.response.send_message(embed=embed) 
+    
         
 # --- 1. /gacha (Member) ---
 @client.tree.command(name="gacha", description="Spend 50 coins to pull a random card")
