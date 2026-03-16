@@ -136,6 +136,45 @@ class UserLeaderboardPaginator(ui.View):
             await interaction.response.edit_message(embed=await self.create_embed(), view=self)
         else: await interaction.response.defer()
 
+class TradeView(ui.View):
+    def __init__(self, sender, receiver, sender_card, receiver_card):
+        super().__init__(timeout=120)
+        self.sender = sender
+        self.receiver = receiver
+        self.sender_card = sender_card # (id, name)
+        self.receiver_card = receiver_card # (id, name)
+        self.accepted = False
+
+    @ui.button(label="Accept Trade", style=discord.ButtonStyle.green)
+    async def accept(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.receiver.id:
+            return await interaction.response.send_message("Only the trade receiver can accept this!", ephemeral=True)
+        
+        # Execute the trade logic
+        # Remove from sender, give to receiver
+        cursor.execute('UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND card_id = ?', (str(self.sender.id), self.sender_card[0]))
+        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(self.receiver.id), self.sender_card[0]))
+        
+        # Remove from receiver, give to sender
+        cursor.execute('UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND card_id = ?', (str(self.receiver.id), self.receiver_card[0]))
+        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(self.sender.id), self.receiver_card[0]))
+        
+        # Clean up empty slots
+        cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+        conn.commit()
+
+        self.accepted = True
+        self.stop()
+        await interaction.response.edit_message(content=f"🤝 **Trade Complete!** {self.sender.mention} and {self.receiver.mention} have swapped cards.", view=None)
+
+    @ui.button(label="Decline", style=discord.ButtonStyle.red)
+    async def decline(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id not in [self.sender.id, self.receiver.id]:
+            return await interaction.response.send_message("This isn't your trade!", ephemeral=True)
+        self.stop()
+        await interaction.response.edit_message(content="❌ Trade cancelled.", view=None)
+                         
+
 # --- 5. BOT SETUP ---
 class GachaBot(discord.Client):
     def __init__(self):
