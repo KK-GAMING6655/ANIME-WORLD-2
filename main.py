@@ -277,6 +277,7 @@ class TradeView(ui.View):
         self.stop()
         await interaction.response.edit_message(content="❌ Trade cancelled.", view=None)
                          
+
 class MarketPaginator(ui.View):
     def __init__(self, listings, client):
         super().__init__(timeout=120)
@@ -302,8 +303,12 @@ class MarketPaginator(ui.View):
         cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
         owners = cursor.fetchone()[0]
 
-        seller = self.client.get_user(int(seller_id))
-        seller_name = seller.name if seller else "Unknown User"
+        # FIX 3: Fetch the user directly from Discord if they aren't in the bot's temporary cache
+        try:
+            seller = self.client.get_user(int(seller_id)) or await self.client.fetch_user(int(seller_id))
+            seller_name = seller.name
+        except:
+            seller_name = "Unknown User"
 
         embed = discord.Embed(title="🛒 Global Market", color=color)
         embed.description = f"**Page {self.current_page + 1} of {len(self.listings)}**"
@@ -352,24 +357,27 @@ class MarketPaginator(ui.View):
         card_id, name, rarity, value, image = item[4], item[5], item[6], item[7], item[8]
         total_amount = price * qty
 
-        # Check if the item is still in the database (someone else might have bought it!)
         cursor.execute('SELECT * FROM market WHERE selling_id = ?', (selling_id,))
         if not cursor.fetchone():
-            await interaction.message.delete()
-            return await interaction.response.send_message(embed=discord.Embed(description="⚠️ This item was already sold or removed!", color=discord.Color.red()), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(description="⚠️ This item was already sold or removed!", color=discord.Color.red()), ephemeral=True)
+            try: await interaction.message.delete()
+            except: pass
+            return
 
         if str(interaction.user.id) == str(seller_id):
             return await interaction.response.send_message(embed=discord.Embed(description="⚠️ You cannot buy your own listing!", color=discord.Color.red()), ephemeral=True)
 
-        # Check buyer balance
         cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
         row = cursor.fetchone()
         balance = row[0] if row else 0
 
+        # FIX 2: Respond with the red embed FIRST, then delete the market menu
         if balance < total_amount:
-            await interaction.message.delete()
             err_embed = discord.Embed(description=f"{interaction.user.mention}, you don't have enough balance to buy that item.\n**Your balance:** {balance} 🪙", color=discord.Color.red())
-            return await interaction.response.send_message(embed=err_embed, ephemeral=True)
+            await interaction.response.send_message(embed=err_embed, ephemeral=True)
+            try: await interaction.message.delete()
+            except: pass
+            return
 
         # Process Transaction
         cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (total_amount, str(interaction.user.id)))
@@ -378,13 +386,15 @@ class MarketPaginator(ui.View):
         cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(interaction.user.id), card_id, qty, qty))
         conn.commit()
 
-        await interaction.message.delete()
-
-        # Public Success Announcement
+        # FIX 1: Send the public message to the channel, acknowledge the button, THEN delete the market menu
         pub_embed = discord.Embed(description=f"🎉 {interaction.user.mention} bought **{name} ({rarity})** from the market for **{total_amount}** 🪙.", color=discord.Color.green())
         pub_embed.add_field(name="Card Details", value=f"**Card Name:** {name}\n**Rarity:** {rarity}\n**Value:** {value}\n**Card Id:** `{card_id}`\n**Quantity:** {qty}\n**Amount:** {total_amount} 🪙", inline=False)
         pub_embed.set_image(url=image)
+        
         await interaction.channel.send(embed=pub_embed)
+        await interaction.response.send_message("✅ Purchase successful!", ephemeral=True)
+        try: await interaction.message.delete()
+        except: pass
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.red, custom_id="cancel")
     async def btn_cancel(self, interaction: discord.Interaction, button: ui.Button):
@@ -395,7 +405,7 @@ class MarketPaginator(ui.View):
         self.add_item(self.btn_buy)
         self.add_item(self.btn_next)
         await interaction.response.edit_message(view=self)
-        
+
 
 
 # --- 5. BOT SETUP ---
