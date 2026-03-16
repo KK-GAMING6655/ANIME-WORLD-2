@@ -21,7 +21,14 @@ cursor = conn.cursor()
 def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)')
     cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id INTEGER PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS inventory (user_id TEXT, card_id INTEGER, quantity INTEGER DEFAULT 1)')
+    
+    # FIX IS HERE: Added UNIQUE(user_id, card_id) at the end
+    cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (
+                        user_id TEXT, 
+                        card_id INTEGER, 
+                        quantity INTEGER DEFAULT 1, 
+                        UNIQUE(user_id, card_id))''')
+    
     cursor.execute('CREATE TABLE IF NOT EXISTS rarities (name TEXT PRIMARY KEY, color TEXT, chance REAL)')
     
     default_rarities = [
