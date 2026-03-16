@@ -709,6 +709,121 @@ async def remove_market(interaction: discord.Interaction, id: int):
     success_embed = discord.Embed(description=f"{interaction.user.mention}, Successfully removed **{card_name}** from the market. The cards have been returned to your inventory.", color=discord.Color.green())
     await interaction.followup.send(embed=success_embed)
     
+# --- PART 6: GIFTING & LEADERBOARDS ---
+
+@client.tree.command(name="gift_card", description="Gift a card to a user for free")
+async def gift_card(interaction: discord.Interaction, user: discord.Member, card_name: str, quantity: int):
+    await interaction.response.defer(ephemeral=True)
+    
+    if user.id == interaction.user.id:
+        return await interaction.followup.send("❌ You can't gift cards to yourself!")
+    if quantity <= 0:
+        return await interaction.followup.send("❌ Quantity must be at least 1!")
+
+    # Check if sender has the card and enough quantity
+    cursor.execute('''SELECT c.card_id, i.quantity, c.name, c.rarity, c.value, c.image 
+                      FROM inventory i JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', 
+                   (str(interaction.user.id), card_name, card_name))
+    card = cursor.fetchone()
+
+    if not card:
+        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ You don't have that card in inventory", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+    
+    if card[1] < quantity:
+        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ You don't have that much card in inventory", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+
+    card_id, _, name, rarity, value, image = card
+
+    # Transfer logic
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(interaction.user.id), card_id))
+    cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(user.id), card_id, quantity, quantity))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+    conn.commit()
+
+    # Get total owners for the embed
+    cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
+    owners = cursor.fetchone()[0]
+
+    # DM to receiver
+    dm_embed = discord.Embed(description=f"{interaction.user.mention} has gifted you **{name}** 🎁", color=discord.Color.green())
+    dm_embed.add_field(name="Details", value=(
+        f"**Name of card:** {name}\n"
+        f"**Rarity:** {rarity}\n"
+        f"**Value:** {value} 🪙\n"
+        f"**Card id:** `{card_id}`\n"
+        f"**Quantity:** {quantity}\n"
+        f"**Owners:** {owners} 👥"
+    ), inline=False)
+    dm_embed.set_image(url=image)
+
+    try:
+        await user.send(embed=dm_embed)
+        await interaction.followup.send(f"✅ Successfully gifted {quantity}x {name} to {user.name}!")
+    except discord.Forbidden:
+        await interaction.followup.send(f"✅ Successfully gifted to {user.name}, but their DMs are closed so I couldn't notify them.")
+
+@client.tree.command(name="gift_coin", description="Gift coins to a user for free")
+async def gift_coin(interaction: discord.Interaction, user: discord.Member, amount: int):
+    await interaction.response.defer(ephemeral=True)
+    
+    if user.id == interaction.user.id:
+        return await interaction.followup.send("❌ You can't gift coins to yourself!")
+    if amount <= 0:
+        return await interaction.followup.send("❌ You must gift at least 1 coin!")
+
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+
+    if balance < amount:
+        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ You don't have enough balance\n**Balance:** {balance} 🪙", color=discord.Color.red())
+        return await interaction.followup.send(embed=err_embed)
+
+    # Transfer logic
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, str(interaction.user.id)))
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(user.id), amount, amount))
+    conn.commit()
+
+    # Get receiver's new balance
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(user.id),))
+    receiver_balance = cursor.fetchone()[0]
+
+    # DM to receiver
+    dm_embed = discord.Embed(description=f"{interaction.user.mention} has gifted you **{amount}** 🪙 coins 🎁\n**Balance:** {receiver_balance} 🪙", color=discord.Color.green())
+
+    try:
+        await user.send(embed=dm_embed)
+        await interaction.followup.send(f"✅ Successfully gifted {amount} coins to {user.name}!")
+    except discord.Forbidden:
+        await interaction.followup.send(f"✅ Successfully gifted to {user.name}, but their DMs are closed so I couldn't notify them.")
+
+@client.tree.command(name="balance_rank", description="View the top 10 users with the highest balance")
+async def balance_rank(interaction: discord.Interaction):
+    await interaction.response.defer() # No ephemeral=True here, so everyone can see it!
+
+    cursor.execute('SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10')
+    top_users = cursor.fetchall()
+
+    if not top_users:
+        return await interaction.followup.send(embed=discord.Embed(description="No users have coins yet!", color=0xFFFF00))
+
+    desc = ""
+    for i, (user_id, balance) in enumerate(top_users, 1):
+        try:
+            # Force discord to fetch the username even if they are offline
+            user_obj = interaction.client.get_user(int(user_id)) or await interaction.client.fetch_user(int(user_id))
+            name = user_obj.name
+        except:
+            name = "Unknown User"
+        
+        desc += f"**{i})** {name} - {balance} 🪙\n"
+
+    embed = discord.Embed(title="🏆 Wealth Leaderboard", description=desc, color=0xFFFF00) # Yellow color
+    await interaction.followup.send(embed=embed)
+        
 
 
 if __name__ == '__main__':
