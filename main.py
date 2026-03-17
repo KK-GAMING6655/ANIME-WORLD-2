@@ -412,6 +412,32 @@ class MarketPaginator(ui.View):
 
 
 
+class HelpPaginator(ui.View):
+    def __init__(self, pages):
+        super().__init__(timeout=60)
+        self.pages = pages
+        self.current_page = 0
+
+    def create_embed(self):
+        embed = discord.Embed(title="📜 Bot Help Menu", color=0xFFFF00)
+        embed.description = f"**Page {self.current_page + 1} of {len(self.pages)}**\n\n{self.pages[self.current_page]}"
+        return embed
+
+    @ui.button(label="⬅️", style=discord.ButtonStyle.grey)
+    async def prev(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else: await interaction.response.defer()
+
+    @ui.button(label="➡️", style=discord.ButtonStyle.grey)
+    async def next(self, interaction: discord.Interaction, button: ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else: await interaction.response.defer()
+        
+
 # --- 5. BOT SETUP ---
 class GachaBot(discord.Client):
     def __init__(self):
