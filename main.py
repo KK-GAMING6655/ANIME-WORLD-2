@@ -17,16 +17,18 @@ def run_flask():
 # --- 2. DATABASE SETUP ---
 # --- SECTION 2: CLOUD DATABASE SETUP (TURSO) ---
 import libsql_experimental as libsql
+import os # Import 'os' to read environment variables
 
-# PASTE YOUR CREDENTIALS HERE
-TURSO_URL = "YOUR_TURSO_CONNECTION_URL"
-TURSO_TOKEN = "YOUR_TURSO_AUTH_TOKEN"
+# This pulls the secrets from Render safely
+TURSO_URL = os.getenv("TURSO_URL")
+TURSO_TOKEN = os.getenv("TURSO_TOKEN")
 
-# Connect to the Cloud Database
+# Connect to the Cloud Database using the variables
 conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
 cursor = conn.cursor()
 
 def init_db():
+    
     # 1. Create all tables (Now living in the cloud!)
     cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)')
     cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id TEXT PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
