@@ -870,7 +870,115 @@ async def clear_inventory(interaction: discord.Interaction, user: discord.Member
     await interaction.response.send_message(embed=embed, ephemeral=True)
     
 
+# --- PART 8: ADMIN MANAGEMENT COMMANDS ---
 
+@client.tree.command(name="delete_card", description="Admin: Delete a card completely from the game")
+async def delete_card(interaction: discord.Interaction, card_name: str):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    
+    cursor.execute('SELECT card_id, name FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
+    card = cursor.fetchone()
+    if not card: 
+        return await interaction.response.send_message("❌ Card not found.", ephemeral=True)
+    
+    card_id, real_name = card[0], card[1]
+    
+    # Delete from everywhere so it doesn't break inventories or the market
+    cursor.execute('DELETE FROM cards WHERE card_id = ?', (card_id,))
+    cursor.execute('DELETE FROM inventory WHERE card_id = ?', (card_id,))
+    cursor.execute('DELETE FROM market WHERE card_id = ?', (card_id,))
+    conn.commit()
+    
+    await interaction.response.send_message(f"✅ Card **{real_name}** has been permanently deleted from the database, all inventories, and the market.", ephemeral=True)
+
+@client.tree.command(name="remove_coin", description="Admin: Remove coins from a user")
+async def remove_coin(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(user.id),))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+    
+    if balance < amount:
+        err_embed = discord.Embed(description=f"{user.mention} doesn't have enough coin to remove.\n**Balance:** {balance} 🪙", color=discord.Color.red())
+        return await interaction.response.send_message(embed=err_embed)
+    
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, str(user.id)))
+    conn.commit()
+    
+    await interaction.response.send_message(f"✅ Successfully removed {amount} 🪙 from {user.mention}.", ephemeral=True)
+
+@client.tree.command(name="remove_card", description="Admin: Remove specific cards from a user")
+async def remove_card(interaction: discord.Interaction, user: discord.Member, card_name: str, quantity: int):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    
+    cursor.execute('''SELECT c.card_id, i.quantity, c.name FROM inventory i 
+                      JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', 
+                   (str(user.id), card_name, card_name))
+    card = cursor.fetchone()
+    
+    # Note: I used Color.red() here for errors. Change to Color.green() if you prefer!
+    if not card:
+        embed = discord.Embed(description=f"{user.mention} doesn't have that card to remove.", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed)
+        
+    if card[1] < quantity:
+        embed = discord.Embed(description=f"{user.mention} doesn't have enough card to remove.", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed)
+        
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(user.id), card[0]))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0') # Clean up 0 quantity rows
+    conn.commit()
+    
+    await interaction.response.send_message(f"✅ Removed {quantity}x **{card[2]}** from {user.mention}'s inventory.", ephemeral=True)
+
+@client.tree.command(name="remove_rarity", description="Admin: Remove a rarity tier")
+async def remove_rarity(interaction: discord.Interaction, rarity: str):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    
+    cursor.execute('DELETE FROM rarities WHERE name = ?', (rarity,))
+    if cursor.rowcount == 0:
+        return await interaction.response.send_message(f"❌ Rarity **{rarity}** not found.", ephemeral=True)
+        
+    # Change affected cards to "Unknown"
+    cursor.execute('UPDATE cards SET rarity = "Unknown" WHERE rarity = ?', (rarity,))
+    conn.commit()
+    
+    await interaction.response.send_message(f"✅ Rarity **{rarity}** removed. Any affected cards now have 'Unknown' rarity.", ephemeral=True)
+
+@client.tree.command(name="edit", description="Admin: Edit an existing card's details")
+async def edit(interaction: discord.Interaction, card_name: str, new_name: str = None, rarity: str = None, value: int = None, image: str = None):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    
+    cursor.execute('SELECT card_id, name, rarity, value, image FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
+    card = cursor.fetchone()
+    
+    if not card: 
+        return await interaction.response.send_message("❌ Card not found.", ephemeral=True)
+    
+    card_id = card[0]
+    
+    # Keep the old values if the user didn't provide new ones
+    final_name = new_name if new_name else card[1]
+    final_rarity = rarity if rarity else card[2]
+    final_value = value if value is not None else card[3]
+    final_image = image if image else card[4]
+    
+    try:
+        cursor.execute('UPDATE cards SET name = ?, rarity = ?, value = ?, image = ? WHERE card_id = ?', 
+                       (final_name, final_rarity, final_value, final_image, card_id))
+        conn.commit()
+        await interaction.response.send_message(f"✅ Card **{card[1]}** updated successfully!", ephemeral=True)
+    except sqlite3.IntegrityError:
+        # This triggers if they try to rename it to a name that already exists
+        await interaction.response.send_message("❌ A card with that new name already exists!", ephemeral=True)
+    
 
 
 if __name__ == '__main__':
