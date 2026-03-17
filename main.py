@@ -16,7 +16,7 @@ def run_flask():
 
 # --- 2. DATABASE SETUP ---
 # --- SECTION 2: CLOUD DATABASE SETUP (TURSO) ---
-import libsql_experimental as libsql
+import libsql
 import os # Import 'os' to read environment variables
 
 # This pulls the secrets from Render safely
@@ -24,7 +24,7 @@ TURSO_URL = os.getenv("TURSO_URL")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN")
 
 # Connect to the Cloud Database using the variables
-conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
 cursor = conn.cursor()
 
 def init_db():
