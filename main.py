@@ -1,11 +1,11 @@
-import discord
+datatime discord
 from discord import app_commands, ui
 import sqlite3
 import os
 import random
 from flask import Flask
 from threading import Thread
-import datatime
+import datetime
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
 @app.route('/')
