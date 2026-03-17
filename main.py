@@ -692,39 +692,35 @@ async def card_list(interaction: discord.Interaction):
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
 # --- MARKET SYSTEM COMMANDS ---
+@client.tree.command(name="market_sell", description="List a card for sale on the market")
+async def market_sell(interaction: discord.Interaction, card_name: str, price: int, quantity: int = 1):
+    if price < 0 or quantity <= 0:
+        return await interaction.response.send_message("❌ Invalid price or quantity.", ephemeral=True)
 
-@client.tree.command(name="market_sell", description="Sell a card in the global market")
-async def market_sell(interaction: discord.Interaction, name: str, amount: int, quantity: int):
-    await interaction.response.defer(ephemeral=True)
-    
-    # Check if user owns the card and quantity
-    cursor.execute('''SELECT c.card_id, i.quantity, c.name FROM inventory i 
+    # Check if user actually has the card and enough quantity
+    cursor.execute('''SELECT i.quantity, c.card_id, c.name FROM inventory i 
                       JOIN cards c ON i.card_id = c.card_id 
-                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', (str(interaction.user.id), name, name))
-    card = cursor.fetchone()
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', 
+                   (str(interaction.user.id), card_name, card_name))
+    row = cursor.fetchone()
 
-    if not card:
-        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ you don't have that card in your inventory!", color=discord.Color.red())
-        return await interaction.followup.send(embed=err_embed)
-    
-    if card[1] < quantity:
-        err_embed = discord.Embed(description=f"{interaction.user.mention} ⚠️ you don't have that much card in your inventory!", color=discord.Color.red())
-        return await interaction.followup.send(embed=err_embed)
+    if not row or row[0] < quantity:
+        return await interaction.response.send_message("❌ You don't have enough of that card to sell!", ephemeral=True)
 
-    # Generate unique 6-digit selling ID
-    while True:
-        selling_id = random.randint(100000, 999999)
-        cursor.execute('SELECT 1 FROM market WHERE selling_id = ?', (selling_id,))
-        if not cursor.fetchone(): break
+    card_id, real_name = row[1], row[2]
 
-    # Remove cards from inventory and add to market
-    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(interaction.user.id), card[0]))
-    cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
-    cursor.execute('INSERT INTO market (selling_id, seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?, ?)', (selling_id, str(interaction.user.id), card[0], amount, quantity))
+    # 1. Remove from inventory FIRST (Prevents the loophole)
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', 
+                   (quantity, str(interaction.user.id), card_id))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0') # Clean up empty slots
+
+    # 2. Add to market
+    cursor.execute('INSERT INTO market (seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?)', 
+                   (str(interaction.user.id), card_id, price, quantity))
     conn.commit()
 
-    success_embed = discord.Embed(description=f"✅ Successfully listed **{quantity}x {card[2]}** on the market for **{amount} 🪙** each!\nSelling ID: `{selling_id}`", color=discord.Color.green())
-    await interaction.followup.send(embed=success_embed)
+    await interaction.response.send_message(f"✅ Listed {quantity}x **{real_name}** for {price} 🪙 each.")
+    
 
 @client.tree.command(name="market", description="Browse the global card market")
 async def market(interaction: discord.Interaction):
