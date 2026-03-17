@@ -15,22 +15,38 @@ def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # --- 2. DATABASE SETUP ---
+# --- SECTION 2: DATABASE SETUP ---
 conn = sqlite3.connect('gacha.db', check_same_thread=False)
 cursor = conn.cursor()
 
 def init_db():
+    # 1. Create all tables
     cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id INTEGER PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id TEXT PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
     
-    # FIX IS HERE: Added UNIQUE(user_id, card_id) at the end
     cursor.execute('''CREATE TABLE IF NOT EXISTS inventory (
                         user_id TEXT, 
-                        card_id INTEGER, 
+                        card_id TEXT, 
                         quantity INTEGER DEFAULT 1, 
                         UNIQUE(user_id, card_id))''')
     
     cursor.execute('CREATE TABLE IF NOT EXISTS rarities (name TEXT PRIMARY KEY, color TEXT, chance REAL)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS market (selling_id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id TEXT, card_id TEXT, price INTEGER, quantity INTEGER)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
+
+    # 2. AUTO-REPAIR: Add missing columns to 'users' if they are missing
+    # This is the secret sauce that stops the "Application not responding" error!
+    cursor.execute("PRAGMA table_info(users)")
+    existing_columns = [column[1] for column in cursor.fetchall()]
     
+    if "account_status" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT 'public'")
+    if "last_beg" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_beg TIMESTAMP")
+    if "last_daily" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_daily TIMESTAMP")
+
+    # 3. Insert default data
     default_rarities = [
         ("Common", "808080", 50.0), ("Uncommon", "008000", 20.0),
         ("Rare", "0000FF", 10.0), ("Epic", "EE82EE", 5.0),
@@ -38,34 +54,13 @@ def init_db():
     ]
     for name, color, chance in default_rarities:
         cursor.execute('INSERT OR IGNORE INTO rarities (name, color, chance) VALUES (?, ?, ?)', (name, color, chance))
-    conn.commit()
-
-    # Add this line right below your inventory table creation
-    cursor.execute('''CREATE TABLE IF NOT EXISTS market (
-                        selling_id INTEGER PRIMARY KEY, 
-                        seller_id TEXT, 
-                        card_id INTEGER, 
-                        price INTEGER, 
-                        quantity INTEGER)''')
-
-
-    # Add this line to store bot settings like the default channel
-    cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
     
-    # Update the users table creation to include status and cooldowns
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        id TEXT PRIMARY KEY, 
-                        balance INTEGER DEFAULT 0,
-                        account_status TEXT DEFAULT 'public',
-                        last_beg TIMESTAMP,
-                        last_daily TIMESTAMP)''')
-
-    # Ensure the default gacha cost exists in config
     cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('gacha_cost', '1000')")
     
-
+    conn.commit()
 
 init_db()
+    
 
 # --- 3. UTILITY FUNCTIONS ---
 
