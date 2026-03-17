@@ -5,7 +5,7 @@ import os
 import random
 from flask import Flask
 from threading import Thread
-
+import datatime
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
 @app.route('/')
@@ -1085,6 +1085,8 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
+    await interaction.response.defer() # Gives the bot 15 minutes to respond instead of 3 seconds
+    
     now = datetime.datetime.now()
     cursor.execute('SELECT last_beg, balance FROM users WHERE id = ?', (str(interaction.user.id),))
     row = cursor.fetchone()
@@ -1095,7 +1097,7 @@ async def beg(interaction: discord.Interaction):
             diff = (last_time + datetime.timedelta(minutes=30)) - now
             minutes = int(diff.total_seconds() // 60)
             embed = discord.Embed(description=f"{interaction.user.mention}\nYou can't beg now. God is busy fulfilling the wishes of others. Please wait **{minutes}** more minutes.", color=discord.Color.red())
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.followup.send(embed=embed) # Use followup after defer
 
     amount = random.randint(1, 250)
     cursor.execute('INSERT INTO users (id, balance, last_beg) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_beg = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
@@ -1105,10 +1107,12 @@ async def beg(interaction: discord.Interaction):
     new_bal = cursor.fetchone()[0]
     
     embed = discord.Embed(title=f"{interaction.user.name}", description=f"God showed mercy on you. You received **{amount}** 🪙 coins!\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 @client.tree.command(name="daily", description="Claim your daily reward")
 async def daily(interaction: discord.Interaction):
+    await interaction.response.defer() # Added defer here too
+    
     now = datetime.datetime.now()
     cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(interaction.user.id),))
     row = cursor.fetchone()
@@ -1116,13 +1120,12 @@ async def daily(interaction: discord.Interaction):
     if row and row[0]:
         last_time = datetime.datetime.fromisoformat(row[0])
         if now.date() == last_time.date():
-            # Calculate time until midnight
             tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
             diff = tomorrow - now
             hours, remainder = divmod(int(diff.total_seconds()), 3600)
             minutes, _ = divmod(remainder, 60)
             embed = discord.Embed(description=f"{interaction.user.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red())
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.followup.send(embed=embed)
 
     amount = random.randint(500, 1000)
     cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
@@ -1132,7 +1135,7 @@ async def daily(interaction: discord.Interaction):
     new_bal = cursor.fetchone()[0]
     
     embed = discord.Embed(description=f"{interaction.user.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 @client.tree.command(name="help", description="List all available commands")
 async def help(interaction: discord.Interaction):
