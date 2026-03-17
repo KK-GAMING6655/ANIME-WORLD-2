@@ -52,6 +52,18 @@ def init_db():
     # Add this line to store bot settings like the default channel
     cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
     
+    # Update the users table creation to include status and cooldowns
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY, 
+                        balance INTEGER DEFAULT 0,
+                        account_status TEXT DEFAULT 'public',
+                        last_beg TIMESTAMP,
+                        last_daily TIMESTAMP)''')
+
+    # Ensure the default gacha cost exists in config
+    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('gacha_cost', '1000')")
+    
+
 
 init_db()
 
