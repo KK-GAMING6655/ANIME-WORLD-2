@@ -466,7 +466,7 @@ client = GachaBot()
 @client.event
 async def on_message(message):
     if message.author.bot: return
-    c = random.randint(1, 5)
+    c = random.randint(10, 50)
     cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
     conn.commit()
 
@@ -590,26 +590,33 @@ async def rarity_list(interaction: discord.Interaction):
     
         
 # --- 1. /gacha (Member) ---
-@client.tree.command(name="gacha", description="Spend 50 coins to pull a random card")
+
+@client.tree.command(name="gacha", description="Spend coins to pull a random card")
 async def gacha(interaction: discord.Interaction):
     await interaction.response.defer()
-    cost = 50
     
-    # Check balance
+    # Fetch dynamic cost from config
+    cursor.execute("SELECT value FROM config WHERE key = 'gacha_cost'")
+    res = cursor.fetchone()
+    cost = int(res[0]) if res else 1000 # Default to 1000 if not set
+
+    # Check user balance
     cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
     row = cursor.fetchone()
-    if not row or row[0] < cost:
-        return await interaction.followup.send(f"❌ You need **{cost}** coins to pull! Chat more to earn coins.")
+    balance = row[0] if row else 0
 
-    # Deduct coins
-    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (cost, str(interaction.user.id)))
-    
-    # Weighted Random Rarity
+    if balance < cost:
+        embed = discord.Embed(description=f"❌ You need **{cost}** 🪙 to pull!\n**Your balance:** {balance} 🪙", color=discord.Color.red())
+        return await interaction.followup.send(embed=embed)
+
+    # Weighted Random Rarity Logic
     cursor.execute('SELECT name, chance FROM rarities')
-    rarity_data = cursor.fetchall() # List of ('Common', 50.0), etc.
+    rarity_data = cursor.fetchall()
+    if not rarity_data:
+        return await interaction.followup.send("⚠️ No rarities have been set up yet! Ask an admin to use `/add_rarity`.")
+
     rarities = [r[0] for r in rarity_data]
     weights = [r[1] for r in rarity_data]
-    
     chosen_rarity = random.choices(rarities, weights=weights, k=1)[0]
     
     # Pick a random card from that rarity
@@ -617,26 +624,26 @@ async def gacha(interaction: discord.Interaction):
     card = cursor.fetchone()
 
     if not card:
-        # Fallback if an admin created a rarity but added no cards to it
-        return await interaction.followup.send("⚠️ The gacha machine malfunctioned! (No cards found for this rarity). Your coins were refunded.")
+        return await interaction.followup.send(f"⚠️ The gacha machine jammed! No cards found for rarity: **{chosen_rarity}**.")
 
-    # Give card to user
+    # Deduct coins and Give card
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (cost, str(interaction.user.id)))
     cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) 
                       ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', (str(interaction.user.id), card[0]))
     conn.commit()
 
-    # Premium Reveal Embed
-    # Use the logic from your CardPaginator to match style
+    # Get rarity color for embed
     cursor.execute('SELECT color FROM rarities WHERE name = ?', (card[2],))
     color_res = cursor.fetchone()
-    embed_color = int(color_res[0], 16) if color_res else 0x3498db
+    embed_color = int(color_res[0], 16) if color_res else 0xFFFF00
 
     embed = discord.Embed(title="✨ GACHA PULL ✨", color=embed_color)
     embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`", inline=False)
     embed.set_image(url=card[4])
-    embed.set_footer(text=f"Remaining Balance: {row[0] - cost} 🪙")
+    embed.set_footer(text=f"Remaining Balance: {balance - cost} 🪙")
     
-    await interaction.followup.send(content=f"{interaction.user.mention} pulled a card!", embed=embed)
+    await interaction.followup.send(content=f"🎉 {interaction.user.mention} pulled a card!", embed=embed)
+    
 
 # --- 6. COMMANDS (REPLACEMENTS) ---
 
