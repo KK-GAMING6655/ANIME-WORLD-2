@@ -160,31 +160,49 @@ class DropView(ui.View):
 
     @ui.button(label="Get", style=discord.ButtonStyle.green)
     async def get_card(self, interaction: discord.Interaction, button: ui.Button):
+        # Initialize the list of users who claimed if it doesn't exist
+        if not hasattr(self, 'claimed_users'):
+            self.claimed_users = []
+
+        # Loophole Fix: Check if this user already claimed from this drop
+        if interaction.user.id in self.claimed_users:
+            return await interaction.response.send_message("❌ You have already claimed a card from this drop!", ephemeral=True)
+
         if self.remaining <= 0:
             return await interaction.response.send_message("All cards claimed!", ephemeral=True)
         
-        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(interaction.user.id), self.card[0]))
+        # Give card to user
+        cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) 
+                          ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', 
+                       (str(interaction.user.id), self.card[0]))
         conn.commit()
         
+        # Track that this user has now claimed
+        self.claimed_users.append(interaction.user.id)
         self.remaining -= 1
         
-        # ADDED: Congratulations message in the channel
+        # Congratulations message
         congrats_embed = discord.Embed(
             description=f"Congratulations 🎉 {interaction.user.mention} won **{self.card[1]} ({self.card[2]})** from the drop!",
-            color=0xFFFF00 # Yellow
+            color=0xFFFF00 
         )
         await interaction.channel.send(embed=congrats_embed)
 
+        # Update the drop message
         if self.remaining <= 0:
             button.disabled, button.label = True, "Claimed Out"
             await interaction.message.edit(view=self)
         else:
             embed = interaction.message.embeds[0]
-            embed.set_field_at(0, name=embed.fields[0].name, value=f"**Rarity:** {self.card[2]}\n**Value:** {self.card[3]} 🪙\n**Quantity Remaining:** {self.remaining}", inline=False)
+            embed.set_field_at(0, name=embed.fields[0].name, 
+                               value=f"**Rarity:** {self.card[2]}\n**Value:** {self.card[3]} 🪙\n**Quantity Remaining:** {self.remaining}", 
+                               inline=False)
             await interaction.message.edit(embed=embed, view=self)
         
-        await interaction.response.defer()
-
+        # Acknowledge the interaction
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        
 
 # NEW: SaleView for DM trading
 class SaleView(ui.View):
