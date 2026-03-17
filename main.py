@@ -1018,6 +1018,131 @@ async def edit(interaction: discord.Interaction, card_name: str, new_name: str =
         await interaction.response.send_message("❌ A card with that new name already exists!", ephemeral=True)
     
 
+# --- PART 9: FINAL FEATURES ---
+
+@client.tree.command(name="add_rarity", description="Admin: Add a new rarity tier")
+async def add_rarity(interaction: discord.Interaction, name: str, drop_rate: float, colour: str):
+    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    if not (0 < drop_rate < 100): return await interaction.response.send_message("❌ Drop rate must be between 0 and 100 (exclusive)!", ephemeral=True)
+    
+    cursor.execute('INSERT INTO rarities (name, chance, color) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET chance = ?, color = ?', (name, drop_rate, colour, drop_rate, colour))
+    conn.commit()
+    await interaction.response.send_message(f"✅ Rarity **{name}** added with **{drop_rate}%** drop rate.", ephemeral=True)
+
+@client.tree.command(name="luck_amount", description="Admin: Set the gacha pull cost")
+async def luck_amount(interaction: discord.Interaction, amount: int):
+    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+    cursor.execute("UPDATE config SET value = ? WHERE key = 'gacha_cost'", (str(amount),))
+    conn.commit()
+    await interaction.response.send_message(f"✅ Gacha cost updated to **{amount} 🪙**.", ephemeral=True)
+
+@client.tree.command(name="account", description="Set your account privacy")
+@app_commands.choices(status=[
+    app_commands.Choice(name="Public", value="public"),
+    app_commands.Choice(name="Private", value="private")
+])
+async def account(interaction: discord.Interaction, status: app_commands.Choice[str]):
+    cursor.execute('INSERT INTO users (id, account_status) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET account_status = ?', (str(interaction.user.id), status.value, status.value))
+    conn.commit()
+    await interaction.response.send_message(f"✅ Your account is now **{status.name}**.", ephemeral=True)
+
+@client.tree.command(name="balance", description="Check your coin balance")
+async def balance(interaction: discord.Interaction):
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    row = cursor.fetchone()
+    bal = row[0] if row else 0
+    embed = discord.Embed(title=f"{interaction.user.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
+    await interaction.response.send_message(embed=embed)
+
+@client.tree.command(name="user_balance", description="Check another member's balance")
+async def user_balance(interaction: discord.Interaction, user: discord.Member):
+    cursor.execute('SELECT balance, account_status FROM users WHERE id = ?', (str(user.id),))
+    row = cursor.fetchone()
+    if row and row[1] == 'private' and interaction.user.id != user.id:
+        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    bal = row[0] if row else 0
+    embed = discord.Embed(title=f"{user.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
+    await interaction.response.send_message(embed=embed)
+
+@client.tree.command(name="user_inventory", description="Check another member's inventory")
+async def user_inventory(interaction: discord.Interaction, user: discord.Member):
+    cursor.execute('SELECT account_status FROM users WHERE id = ?', (str(user.id),))
+    row = cursor.fetchone()
+    if row and row[1] == 'private' and interaction.user.id != user.id:
+        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(user.id),))
+    cards = cursor.fetchall()
+    if not cards: return await interaction.response.send_message(f"{user.name} has no cards!", ephemeral=True)
+    
+    view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
+    await interaction.response.send_message(embed=view.create_embed(), view=view)
+
+@client.tree.command(name="beg", description="Ask for some spare coins")
+async def beg(interaction: discord.Interaction):
+    now = datetime.datetime.now()
+    cursor.execute('SELECT last_beg, balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    row = cursor.fetchone()
+    
+    if row and row[0]:
+        last_time = datetime.datetime.fromisoformat(row[0])
+        if now < last_time + datetime.timedelta(minutes=30):
+            diff = (last_time + datetime.timedelta(minutes=30)) - now
+            minutes = int(diff.total_seconds() // 60)
+            embed = discord.Embed(description=f"{interaction.user.mention}\nYou can't beg now. God is busy fulfilling the wishes of others. Please wait **{minutes}** more minutes.", color=discord.Color.red())
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    amount = random.randint(1, 250)
+    cursor.execute('INSERT INTO users (id, balance, last_beg) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_beg = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
+    conn.commit()
+    
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    new_bal = cursor.fetchone()[0]
+    
+    embed = discord.Embed(title=f"{interaction.user.name}", description=f"God showed mercy on you. You received **{amount}** 🪙 coins!\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
+    await interaction.response.send_message(embed=embed)
+
+@client.tree.command(name="daily", description="Claim your daily reward")
+async def daily(interaction: discord.Interaction):
+    now = datetime.datetime.now()
+    cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    row = cursor.fetchone()
+    
+    if row and row[0]:
+        last_time = datetime.datetime.fromisoformat(row[0])
+        if now.date() == last_time.date():
+            # Calculate time until midnight
+            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
+            diff = tomorrow - now
+            hours, remainder = divmod(int(diff.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+            embed = discord.Embed(description=f"{interaction.user.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red())
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    amount = random.randint(500, 1000)
+    cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
+    conn.commit()
+    
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+    new_bal = cursor.fetchone()[0]
+    
+    embed = discord.Embed(description=f"{interaction.user.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
+    await interaction.response.send_message(embed=embed)
+
+@client.tree.command(name="help", description="List all available commands")
+async def help(interaction: discord.Interaction):
+    pages = [
+        "**1. /balance**\nCheck your current coin balance.\n\n**2. /inventory**\nView your card collection.\n\n**3. /beg**\nAsk for coins (30m cooldown).",
+        "**4. /daily**\nClaim daily coins (resets at midnight).\n\n**5. /market**\nBrowse cards for sale.\n\n**6. /market_sell**\nList a card for sale.",
+        "**7. /user_balance <user>**\nCheck someone else's wealth.\n\n**8. /user_inventory <user>**\nView someone else's collection.\n\n**9. /account <status>**\nSet your profile to Public or Private."
+    ]
+    view = HelpPaginator(pages)
+    await interaction.response.send_message(embed=view.create_embed(), view=view, ephemeral=True)
+                   
+               
 
 if __name__ == '__main__':
     Thread(target=run_flask).start()
