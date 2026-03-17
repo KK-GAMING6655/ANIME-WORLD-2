@@ -1065,18 +1065,28 @@ async def user_balance(interaction: discord.Interaction, user: discord.Member):
 
 @client.tree.command(name="user_inventory", description="Check another member's inventory")
 async def user_inventory(interaction: discord.Interaction, user: discord.Member):
+    await interaction.response.defer() # <--- Added this to fix the timeout
+    
     cursor.execute('SELECT account_status FROM users WHERE id = ?', (str(user.id),))
     row = cursor.fetchone()
-    if row and row[1] == 'private' and interaction.user.id != user.id:
-        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
-        return await interaction.response.send_message(embed=embed, ephemeral=True)
     
-    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(user.id),))
+    # Check privacy
+    if row and row[0] == 'private' and interaction.user.id != user.id:
+        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
+        return await interaction.followup.send(embed=embed)
+    
+    cursor.execute('''SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity 
+                      FROM inventory i 
+                      JOIN cards c ON i.card_id = c.card_id 
+                      WHERE i.user_id = ?''', (str(user.id),))
     cards = cursor.fetchall()
-    if not cards: return await interaction.response.send_message(f"{user.name} has no cards!", ephemeral=True)
+    
+    if not cards:
+        return await interaction.followup.send(f"{user.name} does not have any cards yet!")
     
     view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
-    await interaction.response.send_message(embed=view.create_embed(), view=view)
+    await interaction.followup.send(embed=view.create_embed(), view=view)
+    
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
