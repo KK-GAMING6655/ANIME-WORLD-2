@@ -508,11 +508,6 @@ async def rank(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 # (All other previously defined commands like /balance, /add_card, /inventory etc. should remain below)
-@client.tree.command(name="balance", description="Check balance")
-async def balance(interaction: discord.Interaction):
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    row = cursor.fetchone()
-    await interaction.response.send_message(f"💰 Balance: **{row[0] if row else 0}** coins!")
 
 @client.tree.command(name="add_card", description="Admin: Add card")
 async def add_card(interaction: discord.Interaction, name: str, rarity: str, value: int, image_url: str):
