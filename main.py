@@ -15,12 +15,19 @@ def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # --- 2. DATABASE SETUP ---
-# --- SECTION 2: DATABASE SETUP ---
-conn = sqlite3.connect('gacha.db', check_same_thread=False)
+# --- SECTION 2: CLOUD DATABASE SETUP (TURSO) ---
+import libsql_experimental as libsql
+
+# PASTE YOUR CREDENTIALS HERE
+TURSO_URL = "YOUR_TURSO_CONNECTION_URL"
+TURSO_TOKEN = "YOUR_TURSO_AUTH_TOKEN"
+
+# Connect to the Cloud Database
+conn = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
 cursor = conn.cursor()
 
 def init_db():
-    # 1. Create all tables
+    # 1. Create all tables (Now living in the cloud!)
     cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)')
     cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id TEXT PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
     
@@ -34,8 +41,7 @@ def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS market (selling_id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id TEXT, card_id TEXT, price INTEGER, quantity INTEGER)')
     cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
 
-    # 2. AUTO-REPAIR: Add missing columns to 'users' if they are missing
-    # This is the secret sauce that stops the "Application not responding" error!
+    # 2. AUTO-REPAIR: Ensure columns exist in the cloud
     cursor.execute("PRAGMA table_info(users)")
     existing_columns = [column[1] for column in cursor.fetchall()]
     
@@ -46,20 +52,13 @@ def init_db():
     if "last_daily" not in existing_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN last_daily TIMESTAMP")
 
-    # 3. Insert default data
-    default_rarities = [
-        ("Common", "808080", 50.0), ("Uncommon", "008000", 20.0),
-        ("Rare", "0000FF", 10.0), ("Epic", "EE82EE", 5.0),
-        ("Legendary", "FFFF00", 2.0), ("Super Legendary", "FF0000", 1.0)
-    ]
-    for name, color, chance in default_rarities:
-        cursor.execute('INSERT OR IGNORE INTO rarities (name, color, chance) VALUES (?, ?, ?)', (name, color, chance))
-    
+    # 3. Default Settings
     cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('gacha_cost', '1000')")
     
     conn.commit()
 
 init_db()
+    
     
 
 # --- 3. UTILITY FUNCTIONS ---
