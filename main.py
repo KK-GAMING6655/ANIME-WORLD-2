@@ -1,4 +1,4 @@
-datatime discord
+import discord
 from discord import app_commands, ui
 import sqlite3
 import os
