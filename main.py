@@ -1160,10 +1160,10 @@ async def daily(interaction: discord.Interaction):
 async def help(interaction: discord.Interaction):
     pages = [
         # Page 1: Welcome Page
-        "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the **#default channel**. You can earn coins by chatting with others and by using member commands. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
+        "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the #**Anime TCG** channel. You can earn coins by chatting with others and by using member commands. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
         
         # Page 2: Economy & Basics
-        "**💰 Economy & Basics**\n\n**1. `/balance`**\nCheck your coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your current chat level/rank.",
+        "**💰 Economy & Basics**\n\n**1. `/balance`**\nCheck your coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your current level/rank.",
         
         # Page 3: Gacha & Collecting
         "**🎴 Gacha & Collecting**\n\n**6. `/gacha`**\nSpend coins to pull a random card.\n\n**7. `/inventory`**\nView your card collection.\n\n**8. `/card_list`**\nView all available cards in the bot.\n\n**9. `/view_card`**\nInspect a specific card's details and image.\n\n**10. `/rarity_list`**\nView all card rarities and drop chances.",
