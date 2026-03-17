@@ -49,6 +49,10 @@ def init_db():
                         quantity INTEGER)''')
 
 
+    # Add this line to store bot settings like the default channel
+    cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
+    
+
 init_db()
 
 # --- 3. UTILITY FUNCTIONS ---
@@ -824,6 +828,49 @@ async def balance_rank(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Wealth Leaderboard", description=desc, color=0xFFFF00) # Yellow color
     await interaction.followup.send(embed=embed)
         
+
+# --- PART 7: ADMIN UTILITIES ---
+
+@client.tree.command(name="set_channel", description="Admin: Set the default channel for bot announcements")
+async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+    
+    # Save the channel ID to the config table
+    cursor.execute('''INSERT INTO config (key, value) VALUES (?, ?) 
+                      ON CONFLICT(key) DO UPDATE SET value = ?''', 
+                   ('default_channel', str(channel.id), str(channel.id)))
+    conn.commit()
+    
+    embed = discord.Embed(description=f"✅ Default announcement channel successfully set to {channel.mention}", color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@client.tree.command(name="clear_balance", description="Admin: Reset a user's coin balance to 0")
+async def clear_balance(interaction: discord.Interaction, user: discord.Member):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+    
+    cursor.execute('UPDATE users SET balance = 0 WHERE id = ?', (str(user.id),))
+    conn.commit()
+    
+    embed = discord.Embed(description=f"✅ Successfully cleared {user.mention}'s coin balance to 0 🪙.", color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@client.tree.command(name="clear_inventory", description="Admin: Remove all cards from a user's inventory")
+async def clear_inventory(interaction: discord.Interaction, user: discord.Member):
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+    
+    cursor.execute('DELETE FROM inventory WHERE user_id = ?', (str(user.id),))
+    conn.commit()
+    
+    embed = discord.Embed(description=f"✅ Successfully emptied {user.mention}'s card inventory.", color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+
+
 
 
 if __name__ == '__main__':
