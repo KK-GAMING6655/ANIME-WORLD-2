@@ -555,20 +555,28 @@ async def addcoin(interaction: discord.Interaction, user: discord.Member, amount
 
 # --- 2. /view_card (Member) ---
 @client.tree.command(name="view_card", description="View details of a specific card")
-async def view_card(interaction: discord.Interaction, query: str):
-    await interaction.response.defer(ephemeral=True)
-    
-    # Search by Name or ID
-    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (query, query))
+async def view_card(interaction: discord.Interaction, card_name: str):
+    cursor.execute("SELECT name, rarity, value, image FROM cards WHERE name = ?", (card_name,))
     card = cursor.fetchone()
-    if not card: 
-        return await interaction.followup.send("❌ Card not found.")
+
+    if not card:
+        return await interaction.response.send_message("Card not found!", ephemeral=True)
+
+    name, rarity, value, image_url = card
+
+    # Get the color for the rarity
+    cursor.execute("SELECT color FROM rarities WHERE name = ?", (rarity,))
+    rarity_data = cursor.fetchone()
+    color_val = int(rarity_data[0].replace("#", ""), 16) if rarity_data else 0xffffff
+
+    embed = discord.Embed(title=f"🎴 {name}", color=color_val)
+    embed.add_field(name="Rarity", value=rarity, inline=True)
+    embed.add_field(name="Value", value=f"{value} 🪙", inline=True)
+    if image_url:
+        embed.set_image(url=image_url)
+
+    await interaction.response.send_message(embed=embed)
     
-    # Use the Paginator logic to create a single premium embed without buttons
-    view = CardPaginator([card], 0, "Card Details")
-    await interaction.followup.send(embed=view.create_embed())
-
-
 
 # --- 4. /inspect_inventory (Admin) ---
 @client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
@@ -682,16 +690,34 @@ async def trade(interaction: discord.Interaction, user: discord.Member, card_nam
         await interaction.followup.send(f"✅ Offer sent to {user.name}!")
     except: await interaction.followup.send("❌ User has DMs closed!")
 
-@client.tree.command(name="card_list", description="Admin: Sorted card list")
+@client.tree.command(name="card_list", description="View all available cards")
 async def card_list(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: return await interaction.followup.send("❌ Admin!")
-    cursor.execute('SELECT * FROM cards')
-    cards = cursor.fetchall()
-    sorted_cards = sorted(cards, key=lambda x: RARITY_ORDER.get(x[2], 99))
-    view = CardPaginator(sorted_cards, 0, "Global List")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
+    cursor.execute("SELECT name, rarity, value FROM cards")
+    all_cards = cursor.fetchall()
 
+    if not all_cards:
+        return await interaction.response.send_message("No cards available yet!", ephemeral=True)
+
+    embed = discord.Embed(title="🎴 Anime TCG Card List", color=0x2f3136) # Default dark color
+
+    for name, rarity, value in all_cards:
+        # Fetch the color for THIS specific rarity
+        cursor.execute("SELECT color FROM rarities WHERE name = ?", (rarity,))
+        result = cursor.fetchone()
+        
+        # Convert hex string (like #FFD700) to Discord color hex (0xFFD700)
+        color_hex = int(result[0].replace("#", ""), 16) if result else 0x2f3136
+        
+        embed.add_field(
+            name=f"{name}", 
+            value=f"✨ **{rarity}**\n💰 Value: {value}", 
+            inline=True
+        )
+        # Note: Discord embeds can only have ONE side color. 
+        # If you show many cards, the embed will take the color of the LAST card found.
+    
+    await interaction.response.send_message(embed=embed)
+    
 # --- MARKET SYSTEM COMMANDS ---
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
 async def market_sell(interaction: discord.Interaction, card_name: str, price: int, quantity: int = 1):
