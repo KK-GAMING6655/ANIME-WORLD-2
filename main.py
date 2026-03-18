@@ -102,9 +102,7 @@ def get_all_leaderboard_data():
 
 # --- 4. PREMIUM UI PAGINATORS ---
 
-# --- 4. UI CLASSES ---
-
-
+#--- 4. UI CLASSES ---
 class CardPaginator(ui.View):
     def __init__(self, cards, start_index, title_prefix="Card"):
         super().__init__(timeout=60)
@@ -119,7 +117,13 @@ class CardPaginator(ui.View):
         
         cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
         res = cursor.fetchone()
-        color = int(res[0], 16) if res else 0x3498db
+        
+        # --- THE FIX IS HERE ---
+        # It removes the '#' symbol so Discord understands the color!
+        try:
+            color = int(res[0].replace("#", ""), 16) if res else 0x3498db
+        except:
+            color = 0x3498db
 
         embed = discord.Embed(title=f"{self.title_prefix}", color=color)
         
@@ -152,6 +156,8 @@ class CardPaginator(ui.View):
             self.current_page += 1
             await interaction.response.edit_message(embed=self.create_embed(), view=self)
         else: await interaction.response.defer()
+        
+
 
 class DropView(ui.View):
     def __init__(self, card, quantity):
@@ -328,7 +334,7 @@ class MarketPaginator(ui.View):
 
         cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
         res = cursor.fetchone()
-        color = int(res[0], 16) if res else 0x3498db
+        color = int(res[0].replace("#", ""), 16) if res else 0x3498db
 
         cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
         owners = cursor.fetchone()[0]
@@ -555,27 +561,18 @@ async def addcoin(interaction: discord.Interaction, user: discord.Member, amount
 
 # --- 2. /view_card (Member) ---
 @client.tree.command(name="view_card", description="View details of a specific card")
-async def view_card(interaction: discord.Interaction, card_name: str):
-    cursor.execute("SELECT name, rarity, value, image FROM cards WHERE name = ?", (card_name,))
+async def view_card(interaction: discord.Interaction, query: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    # Search by Name or ID
+    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (query, query))
     card = cursor.fetchone()
-
-    if not card:
-        return await interaction.response.send_message("Card not found!", ephemeral=True)
-
-    name, rarity, value, image_url = card
-
-    # Get the color for the rarity
-    cursor.execute("SELECT color FROM rarities WHERE name = ?", (rarity,))
-    rarity_data = cursor.fetchone()
-    color_val = int(rarity_data[0].replace("#", ""), 16) if rarity_data else 0xffffff
-
-    embed = discord.Embed(title=f"🎴 {name}", color=color_val)
-    embed.add_field(name="Rarity", value=rarity, inline=True)
-    embed.add_field(name="Value", value=f"{value} 🪙", inline=True)
-    if image_url:
-        embed.set_image(url=image_url)
-
-    await interaction.response.send_message(embed=embed)
+    if not card: 
+        return await interaction.followup.send("❌ Card not found.")
+    
+    # Uses your original Paginator logic to create the embed
+    view = CardPaginator([card], 0, "Card Details")
+    await interaction.followup.send(embed=view.create_embed())
     
 
 # --- 4. /inspect_inventory (Admin) ---
@@ -652,7 +649,7 @@ async def gacha(interaction: discord.Interaction):
     # Get rarity color for embed
     cursor.execute('SELECT color FROM rarities WHERE name = ?', (card[2],))
     color_res = cursor.fetchone()
-    embed_color = int(color_res[0], 16) if color_res else 0xFFFF00
+    embed_color = int(color_res[0].replace("#", ""), 16) if color_res else 0xFFFF00
 
     embed = discord.Embed(title="✨ GACHA PULL ✨", color=embed_color)
     embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`", inline=False)
@@ -690,33 +687,20 @@ async def trade(interaction: discord.Interaction, user: discord.Member, card_nam
         await interaction.followup.send(f"✅ Offer sent to {user.name}!")
     except: await interaction.followup.send("❌ User has DMs closed!")
 
-@client.tree.command(name="card_list", description="View all available cards")
+@client.tree.command(name="card_list", description="Admin: Sorted card list")
 async def card_list(interaction: discord.Interaction):
-    cursor.execute("SELECT name, rarity, value FROM cards")
-    all_cards = cursor.fetchall()
-
-    if not all_cards:
-        return await interaction.response.send_message("No cards available yet!", ephemeral=True)
-
-    embed = discord.Embed(title="🎴 Anime TCG Card List", color=0x2f3136) # Default dark color
-
-    for name, rarity, value in all_cards:
-        # Fetch the color for THIS specific rarity
-        cursor.execute("SELECT color FROM rarities WHERE name = ?", (rarity,))
-        result = cursor.fetchone()
-        
-        # Convert hex string (like #FFD700) to Discord color hex (0xFFD700)
-        color_hex = int(result[0].replace("#", ""), 16) if result else 0x2f3136
-        
-        embed.add_field(
-            name=f"{name}", 
-            value=f"✨ **{rarity}**\n💰 Value: {value}", 
-            inline=True
-        )
-        # Note: Discord embeds can only have ONE side color. 
-        # If you show many cards, the embed will take the color of the LAST card found.
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.user.guild_permissions.manage_guild: 
+        return await interaction.followup.send("❌ Admin!")
     
-    await interaction.response.send_message(embed=embed)
+    cursor.execute('SELECT * FROM cards')
+    cards = cursor.fetchall()
+    
+    # Restores your original rarity sorting
+    sorted_cards = sorted(cards, key=lambda x: RARITY_ORDER.get(x[2], 99))
+    
+    view = CardPaginator(sorted_cards, 0, "Global List")
+    await interaction.followup.send(embed=view.create_embed(), view=view)
     
 # --- MARKET SYSTEM COMMANDS ---
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
