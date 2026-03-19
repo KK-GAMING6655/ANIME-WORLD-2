@@ -1113,7 +1113,6 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
     await interaction.followup.send(embed=view.create_embed(), view=view)
     
 # Put this dictionary at the top of your file near your other variables
-beg_cooldowns = {}
 
 @client.tree.command(name="beg", description="Beg for some coins")
 async def beg(interaction: discord.Interaction):
