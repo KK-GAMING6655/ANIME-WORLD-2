@@ -100,7 +100,7 @@ def get_all_leaderboard_data():
     leaderboard.sort(key=lambda x: x["points"], reverse=True)
     return leaderboard
 
-# --- 4. PREMIUM UI PAGINATORS ---
+#--- 4. PREMIUM UI PAGINATORS ---
 
 #--- 4. UI CLASSES ---
 class CardPaginator(ui.View):
@@ -486,7 +486,7 @@ client = GachaBot()
 @client.event
 async def on_message(message):
     if message.author.bot: return
-    c = random.randint(10, 50)
+    c = random.randint(5, 25)
     cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
     conn.commit()
 
@@ -1112,60 +1112,87 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
     view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
     await interaction.followup.send(embed=view.create_embed(), view=view)
     
+# Put this dictionary at the top of your file near your other variables
+beg_cooldowns = {}
 
-@client.tree.command(name="beg", description="Ask for some spare coins")
+@client.tree.command(name="beg", description="Beg for some coins")
 async def beg(interaction: discord.Interaction):
-    await interaction.response.defer() # Gives the bot 15 minutes to respond instead of 3 seconds
+    await interaction.response.defer() 
     
+    user_id = str(interaction.user.id)
     now = datetime.datetime.now()
-    cursor.execute('SELECT last_beg, balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    row = cursor.fetchone()
     
-    if row and row[0]:
-        last_time = datetime.datetime.fromisoformat(row[0])
-        if now < last_time + datetime.timedelta(minutes=30):
-            diff = (last_time + datetime.timedelta(minutes=30)) - now
-            minutes = int(diff.total_seconds() // 60)
-            embed = discord.Embed(description=f"{interaction.user.mention}\nYou can't beg now. God is busy fulfilling the wishes of others. Please wait **{minutes}** more minutes.", color=discord.Color.red())
-            return await interaction.followup.send(embed=embed) # Use followup after defer
+    # --- 1. COOLDOWN CHECK (1 minute) ---
+    if user_id in beg_cooldowns:
+        last_beg = beg_cooldowns[user_id]
+        if now - last_beg < datetime.timedelta(minutes=1):
+            remaining = datetime.timedelta(minutes=1) - (now - last_beg)
+            minutes, seconds = divmod(int(remaining.total_seconds()), 60)
+            
+            # Your custom Cooldown Message
+            return await interaction.followup.send(
+                f"⏳ God is busy fulfilling others' wishes. Please wait **{minutes}m {seconds}s**."
+            )
+            
+    # Update their last beg time to right now
+    beg_cooldowns[user_id] = now
+    
+    # --- 2. GIVE COINS ---
+    amount = random.randint(50, 200)
 
-    amount = random.randint(1, 250)
-    cursor.execute('INSERT INTO users (id, balance, last_beg) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_beg = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
+    cursor.execute('INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)', (user_id,))
+    cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount, user_id))
+    
+    # --- 3. GET NEW BALANCE ---
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    new_balance = cursor.fetchone()[0]
+    
     conn.commit()
-    
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    new_bal = cursor.fetchone()[0]
-    
-    embed = discord.Embed(title=f"{interaction.user.name}", description=f"God showed mercy on you. You received **{amount}** 🪙 coins!\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
-    await interaction.followup.send(embed=embed)
 
-@client.tree.command(name="daily", description="Claim your daily reward")
+    # Your custom Success Message
+    await interaction.followup.send(
+        f"🙏 God showed mercy on you! You received **{amount} 🪙**.\n**Balance:** {new_balance} 🪙"
+    )
+    @client.tree.command(name="daily", description="Claim your daily bonus")
 async def daily(interaction: discord.Interaction):
-    await interaction.response.defer() # Added defer here too
+    await interaction.response.defer() 
     
+    user_id = str(interaction.user.id)
     now = datetime.datetime.now()
-    cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    row = cursor.fetchone()
-    
-    if row and row[0]:
-        last_time = datetime.datetime.fromisoformat(row[0])
-        if now.date() == last_time.date():
-            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
-            diff = tomorrow - now
-            hours, remainder = divmod(int(diff.total_seconds()), 3600)
-            minutes, _ = divmod(remainder, 60)
-            embed = discord.Embed(description=f"{interaction.user.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red())
-            return await interaction.followup.send(embed=embed)
 
-    amount = random.randint(500, 1000)
-    cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
+    cursor.execute('SELECT last_daily FROM users WHERE id = ?', (user_id,))
+    res = cursor.fetchone()
+
+    # --- 1. COOLDOWN CHECK (24 Hours) ---
+    if res and res[0]:
+        last_daily = datetime.datetime.fromisoformat(res[0])
+        if now - last_daily < datetime.timedelta(days=1):
+            remaining = datetime.timedelta(days=1) - (now - last_daily)
+            hours, remainder = divmod(remaining.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            
+            return await interaction.followup.send(
+                f"🕒 You already claimed your daily bonus! Come back in **{hours}h {minutes}m**."
+            )
+
+    # --- 2. GIVE RANDOM COINS (500 to 1000) ---
+    daily_amount = random.randint(500, 1000)
+
+    cursor.execute('INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)', (user_id,))
+    cursor.execute('UPDATE users SET balance = balance + ?, last_daily = ? WHERE id = ?', (daily_amount, now.isoformat(), user_id))
+    
+    # --- 3. GET NEW BALANCE ---
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    new_balance = cursor.fetchone()[0]
+    
     conn.commit()
+
+    await interaction.followup.send(
+        f"☀️ You claimed your daily bonus and got **{daily_amount} 🪙**!\n**Balance:** {new_balance} 🪙"
+            )
     
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    new_bal = cursor.fetchone()[0]
-    
-    embed = discord.Embed(description=f"{interaction.user.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
-    await interaction.followup.send(embed=embed)
+
+
 
 @client.tree.command(name="help", description="List all available commands and how to play")
 async def help(interaction: discord.Interaction):
