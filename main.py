@@ -6,6 +6,8 @@ import random
 from flask import Flask
 from threading import Thread
 import datetime
+beg_cooldowns = {}
+
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
 @app.route('/')
