@@ -1114,8 +1114,7 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
     view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
     await interaction.followup.send(embed=view.create_embed(), view=view)
     
-# Put this dictionary at the top of your file near your other variables
-
+ # --- BEG COMMAND ---
 @client.tree.command(name="beg", description="Beg for some coins")
 async def beg(interaction: discord.Interaction):
     await interaction.response.defer() 
@@ -1123,38 +1122,28 @@ async def beg(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     now = datetime.datetime.now()
     
-    # --- 1. COOLDOWN CHECK (1 minute) ---
+    # Check cooldown (1 minute)
     if user_id in beg_cooldowns:
-        last_beg = beg_cooldowns[user_id]
-        if now - last_beg < datetime.timedelta(minutes=1):
-            remaining = datetime.timedelta(minutes=1) - (now - last_beg)
-            minutes, seconds = divmod(int(remaining.total_seconds()), 60)
+        if now - beg_cooldowns[user_id] < datetime.timedelta(minutes=1):
+            remaining = datetime.timedelta(minutes=1) - (now - beg_cooldowns[user_id])
+            secs = int(remaining.total_seconds())
+            return await interaction.followup.send(f"⏳ God is busy fulfilling others' wishes. Please wait **{secs}s**.")
             
-            # Your custom Cooldown Message
-            return await interaction.followup.send(
-                f"⏳ God is busy fulfilling others' wishes. Please wait **{minutes}m {seconds}s**."
-            )
-            
-    # Update their last beg time to right now
     beg_cooldowns[user_id] = now
     
-    # --- 2. GIVE COINS ---
-    amount = random.randint(50, 200)
-
+    # Amount 1-250 as requested
+    amount = random.randint(1, 250)
     cursor.execute('INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)', (user_id,))
     cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount, user_id))
     
-    # --- 3. GET NEW BALANCE ---
     cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
     new_balance = cursor.fetchone()[0]
-    
     conn.commit()
 
-    # Your custom Success Message
-    await interaction.followup.send(
-        f"🙏 God showed mercy on you! You received **{amount} 🪙**.\n**Balance:** {new_balance} 🪙"
-    )
-    @client.tree.command(name="daily", description="Claim your daily bonus")
+    await interaction.followup.send(f"🙏 God showed mercy on you! You received **{amount} 🪙**.\n**Balance:** {new_balance} 🪙")
+
+# --- DAILY COMMAND ---
+@client.tree.command(name="daily", description="Claim your daily bonus")
 async def daily(interaction: discord.Interaction):
     await interaction.response.defer() 
     
@@ -1164,33 +1153,25 @@ async def daily(interaction: discord.Interaction):
     cursor.execute('SELECT last_daily FROM users WHERE id = ?', (user_id,))
     res = cursor.fetchone()
 
-    # --- 1. COOLDOWN CHECK (24 Hours) ---
+    # Cooldown check
     if res and res[0]:
         last_daily = datetime.datetime.fromisoformat(res[0])
         if now - last_daily < datetime.timedelta(days=1):
             remaining = datetime.timedelta(days=1) - (now - last_daily)
             hours, remainder = divmod(remaining.seconds, 3600)
             minutes, _ = divmod(remainder, 60)
-            
-            return await interaction.followup.send(
-                f"🕒 You already claimed your daily bonus! Come back in **{hours}h {minutes}m**."
-            )
+            return await interaction.followup.send(f"🕒 You already claimed your daily bonus! Come back in **{hours}h {minutes}m**.")
 
-    # --- 2. GIVE RANDOM COINS (500 to 1000) ---
+    # Amount 500-1000 as requested
     daily_amount = random.randint(500, 1000)
-
     cursor.execute('INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)', (user_id,))
     cursor.execute('UPDATE users SET balance = balance + ?, last_daily = ? WHERE id = ?', (daily_amount, now.isoformat(), user_id))
     
-    # --- 3. GET NEW BALANCE ---
     cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
     new_balance = cursor.fetchone()[0]
-    
     conn.commit()
 
-    await interaction.followup.send(
-        f"☀️ You claimed your daily bonus and got **{daily_amount} 🪙**!\n**Balance:** {new_balance} 🪙"
-            )
+    await interaction.followup.send(f"☀️ You claimed your daily bonus and received **{daily_amount} 🪙**!\n**Balance:** {new_balance} 🪙")
     
 
 
