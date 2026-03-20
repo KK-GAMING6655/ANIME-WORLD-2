@@ -478,9 +478,23 @@ class GachaBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        # This syncs commands when the bot starts up
         await self.tree.sync()
+        print("Slash commands synced via setup_hook")
 
 client = GachaBot()
+
+@client.event
+async def on_ready():
+    print(f'Logged in as {client.user} (ID: {client.user.id})')
+    print('------')
+    # This is the "Force Sync" that fixes the "Not Responding" error
+    try:
+        synced = await client.tree.sync()
+        print(f"Synced {len(synced)} command(s) successfully!")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
+        
 
 @client.event
 async def on_message(message):
