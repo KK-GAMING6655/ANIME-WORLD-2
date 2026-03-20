@@ -321,43 +321,29 @@ class MarketPaginator(ui.View):
         self.listings = listings
         self.current_page = 0
         self.client = client
-        
-        # Hide confirm/cancel buttons initially
-        self.remove_item(self.btn_confirm)
-        self.remove_item(self.btn_cancel)
 
     async def create_embed(self):
+        # (keep your exact create_embed code here - no change)
         item = self.listings[self.current_page]
-        # item: (selling_id, seller_id, price, qty, card_id, name, rarity, value, image)
         selling_id, seller_id, price, qty = item[0], item[1], item[2], item[3]
         card_id, name, rarity, value, image = item[4], item[5], item[6], item[7], item[8]
         total_amount = price * qty
-
         cursor.execute('SELECT color FROM rarities WHERE name = ?', (rarity,))
         res = cursor.fetchone()
         color = int(res[0].replace("#", ""), 16) if res else 0x3498db
-
         cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
         owners = cursor.fetchone()[0]
-
-        # FIX 3: Fetch the user directly from Discord if they aren't in the bot's temporary cache
         try:
             seller = self.client.get_user(int(seller_id)) or await self.client.fetch_user(int(seller_id))
             seller_name = seller.name
         except:
             seller_name = "Unknown User"
-
         embed = discord.Embed(title="🛒 Global Market", color=color)
         embed.description = f"**Page {self.current_page + 1} of {len(self.listings)}**"
         embed.add_field(name=f"**{name}**", value=(
-            f"**Rarity:** {rarity}\n"
-            f"**Value:** {value} 🪙\n"
-            f"**Owners:** {owners} 👥\n"
-            f"**Selling Amount:** {price} 🪙\n"
-            f"**Quantity:** {qty}\n"
-            f"**Total Amount:** {total_amount} 🪙\n"
-            f"**Seller:** {seller_name}\n"
-            f"**Card ID:** `{card_id}`"
+            f"**Rarity:** {rarity}\n**Value:** {value} 🪙\n**Owners:** {owners} 👥\n"
+            f"**Selling Amount:** {price} 🪙\n**Quantity:** {qty}\n**Total Amount:** {total_amount} 🪙\n"
+            f"**Seller:** {seller_name}\n**Card ID:** `{card_id}`"
         ), inline=False)
         embed.set_image(url=image)
         embed.set_footer(text=f"Selling ID: {selling_id}")
@@ -372,12 +358,11 @@ class MarketPaginator(ui.View):
 
     @ui.button(label="Buy", style=discord.ButtonStyle.green, custom_id="buy")
     async def btn_buy(self, interaction: discord.Interaction, button: ui.Button):
-        # Swap buttons
-        self.remove_item(self.btn_prev)
-        self.remove_item(self.btn_buy)
-        self.remove_item(self.btn_next)
-        self.add_item(self.btn_confirm)
-        self.add_item(self.btn_cancel)
+        self.btn_prev.disabled = True
+        self.btn_buy.disabled = True
+        self.btn_next.disabled = True
+        self.btn_confirm.disabled = False
+        self.btn_cancel.disabled = False
         await interaction.response.edit_message(view=self)
 
     @ui.button(label="➡️", style=discord.ButtonStyle.grey, custom_id="next")
@@ -387,63 +372,18 @@ class MarketPaginator(ui.View):
             await interaction.response.edit_message(embed=await self.create_embed(), view=self)
         else: await interaction.response.defer()
 
-    @ui.button(label="Confirm", style=discord.ButtonStyle.green, custom_id="confirm")
+    @ui.button(label="Confirm", style=discord.ButtonStyle.green, custom_id="confirm", disabled=True)
     async def btn_confirm(self, interaction: discord.Interaction, button: ui.Button):
-        item = self.listings[self.current_page]
-        selling_id, seller_id, price, qty = item[0], item[1], item[2], item[3]
-        card_id, name, rarity, value, image = item[4], item[5], item[6], item[7], item[8]
-        total_amount = price * qty
+        # (keep your exact btn_confirm code - no change)
 
-        cursor.execute('SELECT * FROM market WHERE selling_id = ?', (selling_id,))
-        if not cursor.fetchone():
-            await interaction.response.send_message(embed=discord.Embed(description="⚠️ This item was already sold or removed!", color=discord.Color.red()), ephemeral=True)
-            try: await interaction.message.delete()
-            except: pass
-            return
-
-        if str(interaction.user.id) == str(seller_id):
-            return await interaction.response.send_message(embed=discord.Embed(description="⚠️ You cannot buy your own listing!", color=discord.Color.red()), ephemeral=True)
-
-        cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
-        row = cursor.fetchone()
-        balance = row[0] if row else 0
-
-        # FIX 2: Respond with the red embed FIRST, then delete the market menu
-        if balance < total_amount:
-            err_embed = discord.Embed(description=f"{interaction.user.mention}, you don't have enough balance to buy that item.\n**Your balance:** {balance} 🪙", color=discord.Color.red())
-            await interaction.response.send_message(embed=err_embed, ephemeral=True)
-            try: await interaction.message.delete()
-            except: pass
-            return
-
-        # Process Transaction
-        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (total_amount, str(interaction.user.id)))
-        cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(seller_id), total_amount, total_amount))
-        cursor.execute('DELETE FROM market WHERE selling_id = ?', (selling_id,))
-        cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(interaction.user.id), card_id, qty, qty))
-        conn.commit()
-
-        # FIX 1: Send the public message to the channel, acknowledge the button, THEN delete the market menu
-        pub_embed = discord.Embed(description=f"🎉 {interaction.user.mention} bought **{name} ({rarity})** from the market for **{total_amount}** 🪙.", color=discord.Color.green())
-        pub_embed.add_field(name="Card Details", value=f"**Card Name:** {name}\n**Rarity:** {rarity}\n**Value:** {value}\n**Card Id:** `{card_id}`\n**Quantity:** {qty}\n**Amount:** {total_amount} 🪙", inline=False)
-        pub_embed.set_image(url=image)
-        
-        await interaction.channel.send(embed=pub_embed)
-        await interaction.response.send_message("✅ Purchase successful!", ephemeral=True)
-        try: await interaction.message.delete()
-        except: pass
-
-    @ui.button(label="Cancel", style=discord.ButtonStyle.red, custom_id="cancel")
+    @ui.button(label="Cancel", style=discord.ButtonStyle.red, custom_id="cancel", disabled=True)
     async def btn_cancel(self, interaction: discord.Interaction, button: ui.Button):
-        # Swap back to normal buttons
-        self.remove_item(self.btn_confirm)
-        self.remove_item(self.btn_cancel)
-        self.add_item(self.btn_prev)
-        self.add_item(self.btn_buy)
-        self.add_item(self.btn_next)
+        self.btn_prev.disabled = False
+        self.btn_buy.disabled = False
+        self.btn_next.disabled = False
+        self.btn_confirm.disabled = True
+        self.btn_cancel.disabled = True
         await interaction.response.edit_message(view=self)
-
-
 
 class HelpPaginator(ui.View):
     def __init__(self, pages):
@@ -544,10 +484,10 @@ async def inventory(interaction: discord.Interaction):
     await interaction.response.defer()
     cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(interaction.user.id),))
     items = cursor.fetchall()
-    if not items: return await interaction.followup.send("Inventory empty.")
+    if not items: 
+        return await interaction.followup.send("Inventory empty.")
     view = CardPaginator(items, 0, "Your Collection")
-    await interaction.followup.send(embed=embed)
-    
+    await interaction.followup.send(embed=view.create_embed(), view=view)  # ← fixed the missing embed
 # --- 1. /addcoin (Admin) ---
 @client.tree.command(name="addcoin", description="Admin: Give coins to a user")
 async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
@@ -576,7 +516,7 @@ async def view_card(interaction: discord.Interaction, query: str):
     await interaction.followup.send(embed=view.create_embed())
     
 
-# --- 4. /inspect_inventory (Admin) ---
+#--- 4. /inspect_inventory (Admin) ---
 @client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
 async def inspect_inventory(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer(ephemeral=True)
