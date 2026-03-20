@@ -1,35 +1,35 @@
-    import discord
-    from discord import app_commands, ui
-    import sqlite3
-    import os
-    import random
-    from flask import Flask
-    from threading import Thread
-    import datetime
-    # --- 1. WEB SERVER ---
-    app = Flask(__name__)
-    @app.route('/')
-    def home(): return "Bot is awake!"
+import discord
+from discord import app_commands, ui
+import sqlite3
+import os
+import random
+from flask import Flask
+from threading import Thread
+import datetime
+# --- 1. WEB SERVER ---
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Bot is awake!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+# --- 2. DATABASE SETUP ---
+# --- SECTION 2: CLOUD DATABASE SETUP (TURSO) ---
+import libsql
+import os # Import 'os' to read environment variables
+
+# This pulls the secrets from Render safely
+TURSO_URL = os.getenv("TURSO_URL")
+TURSO_TOKEN = os.getenv("TURSO_TOKEN")
+
+# Connect to the Cloud Database using the variables
+conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
+cursor = conn.cursor()
+
+def init_db():
     
-    def run_flask():
-        app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-    
-    # --- 2. DATABASE SETUP ---
-    # --- SECTION 2: CLOUD DATABASE SETUP (TURSO) ---
-    import libsql
-    import os # Import 'os' to read environment variables
-    
-    # This pulls the secrets from Render safely
-    TURSO_URL = os.getenv("TURSO_URL")
-    TURSO_TOKEN = os.getenv("TURSO_TOKEN")
-    
-    # Connect to the Cloud Database using the variables
-    conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
-    cursor = conn.cursor()
-    
-    def init_db():
-        
-        # 1. Create all tables (Now living in the cloud!)
+    # 1. Create all tables (Now living in the cloud!)
     cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, balance INTEGER DEFAULT 0)')
     cursor.execute('CREATE TABLE IF NOT EXISTS cards (card_id TEXT PRIMARY KEY, name TEXT UNIQUE, rarity TEXT, value INTEGER, image TEXT)')
     
@@ -297,7 +297,6 @@ class TradeView(ui.View):
         # Remove from receiver, give to sender
         cursor.execute('UPDATE inventory SET quantity = quantity - 1 WHERE user_id = ? AND card_id = ?', (str(self.receiver.id), self.receiver_card[0]))
         cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1', (str(self.sender.id), self.receiver_card[0]))
-        
         # Clean up empty slots
         cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
         conn.commit()
@@ -600,8 +599,7 @@ async def rarity_list(interaction: discord.Interaction):
     desc = "\n".join([f"✨ **{r[0]}**: {r[1]}%" for r in rows])
     
     embed = discord.Embed(title="Rarity Tiers & Drop Chances", description=desc, color=0xFFD700)
-    await interaction.response.send_message(embed=embed) 
-            
+    await interaction.response.send_message(embed=embed)
 # --- 1. /gacha (Member) ---
 
 @client.tree.command(name="gacha", description="Spend coins to pull a random card")
@@ -894,7 +892,7 @@ async def balance_rank(interaction: discord.Interaction):
 async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     if not interaction.user.guild_permissions.manage_guild: 
         return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-    
+
     # Save the channel ID to the config table
     cursor.execute('''INSERT INTO config (key, value) VALUES (?, ?) 
                       ON CONFLICT(key) DO UPDATE SET value = ?''', 
@@ -902,7 +900,10 @@ async def set_channel(interaction: discord.Interaction, channel: discord.TextCha
     conn.commit()
     
     embed = discord.Embed(description=f"✅ Default announcement channel successfully set to {channel.mention}", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)@client.tree.command(name="clear_balance", description="Admin: Reset a user's coin balance to 0")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@client.tree.command(name="clear_balance", description="Admin: Reset a user's coin balance to 0")
 async def clear_balance(interaction: discord.Interaction, user: discord.Member):
     if not interaction.user.guild_permissions.manage_guild: 
         return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
@@ -1191,6 +1192,5 @@ async def help(interaction: discord.Interaction):
 if __name__ == '__main__':
     Thread(target=run_flask).start()
     client.run(os.environ.get('DISCORD_TOKEN'))
-
 
     
