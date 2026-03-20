@@ -541,13 +541,13 @@ async def add_card(interaction: discord.Interaction, name: str, rarity: str, val
 
 @client.tree.command(name="inventory", description="View your collection")
 async def inventory(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
     cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(interaction.user.id),))
     items = cursor.fetchall()
     if not items: return await interaction.followup.send("Inventory empty.")
     view = CardPaginator(items, 0, "Your Collection")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
-
+    await interaction.followup.send(embed=embed)
+    
 # --- 1. /addcoin (Admin) ---
 @client.tree.command(name="addcoin", description="Admin: Give coins to a user")
 async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
