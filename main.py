@@ -712,13 +712,11 @@ async def card_list(interaction: discord.Interaction):
     
     view = CardPaginator(sorted_cards, 0, "Global List")
     await interaction.followup.send(embed=view.create_embed(), view=view)
- 
-    
 
-    @app_commands.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
-    @app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
-    async def burn(self, interaction: discord.Interaction, card_name: str, quantity: int = 1):
-        if quantity <= 0:
+@client.tree.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
+@app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
+async def burn(self, interaction: discord.Interaction, card_name: str, quantity: int = 1):
+    if quantity <= 0:
             await interaction.response.send_message("Quantity must be at least 1.", ephemeral=True)
             return
 
@@ -729,7 +727,7 @@ async def card_list(interaction: discord.Interaction):
         card = cursor.fetchone()
         
         if not card:
-            await interaction.response.send_message(embed=discord.Embed(description="❌ You don't have that card (Card not found).", color=discord.Color.red()), ephemeral=True)
+            await interaction.response.send_message(embed=discord.Embed(description="❌ Card not found. Please check the name or ID.", color=discord.Color.red()), ephemeral=True)
             return
 
         c_id, name, rarity, value, image = card
@@ -749,20 +747,19 @@ async def card_list(interaction: discord.Interaction):
         try:
             # 3. Update Inventory
             if current_qty == quantity:
-                # User is burning all of them
+                # User is burning their last copy
                 cursor.execute("DELETE FROM inventory WHERE user_id = ? AND card_id = ?", (user_id, c_id))
-                # Reduce owner count in cards table (if you use an owners column)
+                # Reduce owner count in the cards table
                 cursor.execute("UPDATE cards SET owners = owners - 1 WHERE card_id = ?", (c_id,))
             else:
                 cursor.execute("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?", (quantity, user_id, c_id))
 
-            # 4. Add coins to user
-            cursor.execute("INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)", (user_id,))
+            # 4. Give coins to the user
             cursor.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (total_received, user_id))
             
             conn.commit()
 
-            # 5. Success Embed
+            # 5. Success Embed (Public)
             embed = discord.Embed(
                 title="🔥 Card Burned Successfully",
                 description=f"**{interaction.user.name}** successfully burned cards!",
@@ -782,9 +779,8 @@ async def card_list(interaction: discord.Interaction):
         except Exception as e:
             conn.rollback()
             await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
-        
-         
-                           
+                
+
 # --- MARKET SYSTEM COMMANDS ---
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
 async def market_sell(interaction: discord.Interaction, card_name: str, price: int, quantity: int = 1):
