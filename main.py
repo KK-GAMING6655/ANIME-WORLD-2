@@ -712,7 +712,78 @@ async def card_list(interaction: discord.Interaction):
     
     view = CardPaginator(sorted_cards, 0, "Global List")
     await interaction.followup.send(embed=view.create_embed(), view=view)
+ 
     
+    @app_commands.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
+    @app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
+    async def burn(self, interaction: discord.Interaction, card_name: str, quantity: int = 1):
+        if quantity <= 0:
+            await interaction.response.send_message("Quantity must be at least 1.", ephemeral=True)
+            return
+
+        user_id = str(interaction.user.id)
+        
+        # 1. Fetch card details
+        cursor.execute("SELECT card_id, name, rarity, value, image FROM cards WHERE name = ? OR card_id = ?", (card_name, card_name))
+        card = cursor.fetchone()
+        
+        if not card:
+            await interaction.response.send_message(embed=discord.Embed(description="❌ You don't have that card (Card not found).", color=discord.Color.red()), ephemeral=True)
+            return
+
+        c_id, name, rarity, value, image = card
+        burn_value_per_card = int(value * 0.5)
+        total_received = burn_value_per_card * quantity
+
+        # 2. Check user's inventory
+        cursor.execute("SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?", (user_id, c_id))
+        inv_data = cursor.fetchone()
+
+        if not inv_data or inv_data[0] < quantity:
+            await interaction.response.send_message(embed=discord.Embed(description=f"❌ You don't have enough cards (You have: {inv_data[0] if inv_data else 0}).", color=discord.Color.red()), ephemeral=True)
+            return
+
+        current_qty = inv_data[0]
+
+        try:
+            # 3. Update Inventory
+            if current_qty == quantity:
+                # User is burning all of them
+                cursor.execute("DELETE FROM inventory WHERE user_id = ? AND card_id = ?", (user_id, c_id))
+                # Reduce owner count in cards table (if you use an owners column)
+                cursor.execute("UPDATE cards SET owners = owners - 1 WHERE card_id = ?", (c_id,))
+            else:
+                cursor.execute("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?", (quantity, user_id, c_id))
+
+            # 4. Add coins to user
+            cursor.execute("INSERT OR IGNORE INTO users (id, balance) VALUES (?, 0)", (user_id,))
+            cursor.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (total_received, user_id))
+            
+            conn.commit()
+
+            # 5. Success Embed
+            embed = discord.Embed(
+                title="🔥 Card Burned Successfully",
+                description=f"**{interaction.user.name}** successfully burned cards!",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Name", value=name, inline=True)
+            embed.add_field(name="Rarity", value=rarity, inline=True)
+            embed.add_field(name="Id", value=c_id, inline=True)
+            embed.add_field(name="Value", value=f"{value} 🪙", inline=True)
+            embed.add_field(name="Quantity", value=str(quantity), inline=True)
+            embed.add_field(name="Amount Received", value=f"{total_received} 🪙", inline=True)
+            if image:
+                embed.set_thumbnail(url=image)
+
+            await interaction.response.send_message(embed=embed)
+
+        except Exception as e:
+            conn.rollback()
+            await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
+
+         
+                           
 # --- MARKET SYSTEM COMMANDS ---
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
 async def market_sell(interaction: discord.Interaction, card_name: str, price: int, quantity: int = 1):
@@ -1206,5 +1277,6 @@ async def help(interaction: discord.Interaction):
 if __name__ == '__main__':
     Thread(target=run_flask).start()
     client.run(os.environ.get('DISCORD_TOKEN'))
+
 
     
