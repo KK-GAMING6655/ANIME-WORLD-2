@@ -570,8 +570,6 @@ async def view_card(interaction: discord.Interaction, query: str):
     
 
 # --- 4. /inspect_inventory (Admin) ---
-@client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
-async def inspect_inventory(interaction: discord.Interaction, user: discord.Member):
 
 # --- 5. /rarity_list (Member) ---
 
