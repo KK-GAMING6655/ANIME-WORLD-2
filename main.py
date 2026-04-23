@@ -542,15 +542,6 @@ async def rank(interaction: discord.Interaction):
 
 # (All other previously defined commands like /balance, /add_card, /inventory etc. should remain below)
 
-@client.tree.command(name="add_card", description="Admin: Add card")
-async def add_card(interaction: discord.Interaction, name: str, rarity: str, value: int, image_url: str):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: return await interaction.followup.send("❌ Admin!")
-    new_id = random.randint(100000, 999999)
-    cursor.execute('INSERT INTO cards (card_id, name, rarity, value, image) VALUES (?, ?, ?, ?, ?)', (new_id, name, rarity, value, image_url))
-    conn.commit()
-    await interaction.followup.send(f"✅ Added {name} (ID: {new_id})")
-
 @client.tree.command(name="inventory", description="View your collection")
 async def inventory(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -561,16 +552,6 @@ async def inventory(interaction: discord.Interaction):
     await interaction.followup.send(embed=view.create_embed(), view=view)
 
 # --- 1. /addcoin (Admin) ---
-@client.tree.command(name="addcoin", description="Admin: Give coins to a user")
-async def addcoin(interaction: discord.Interaction, user: discord.Member, amount: int):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.followup.send("❌ Admin only!")
-    
-    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', 
-                   (str(user.id), amount, amount))
-    conn.commit()
-    await interaction.followup.send(f"✅ Added **{amount}** coins to {user.mention}!")
 
 # --- 2. /view_card (Member) ---
 @client.tree.command(name="view_card", description="View details of a specific card")
@@ -591,17 +572,6 @@ async def view_card(interaction: discord.Interaction, query: str):
 # --- 4. /inspect_inventory (Admin) ---
 @client.tree.command(name="inspect_inventory", description="Admin: View another user's collection")
 async def inspect_inventory(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.followup.send("❌ Admin only!")
-    
-    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(user.id),))
-    items = cursor.fetchall()
-    if not items: 
-        return await interaction.followup.send(f"❌ {user.name}'s inventory is empty.")
-    
-    view = CardPaginator(items, 0, f"{user.name}'s Collection")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
 
 # --- 5. /rarity_list (Member) ---
 
@@ -614,7 +584,7 @@ async def rarity_list(interaction: discord.Interaction):
     
     embed = discord.Embed(title="Rarity Tiers & Drop Chances", description=desc, color=0xFFD700)
     await interaction.response.send_message(embed=embed)
-# --- 1. /gacha (Member) ---
+#--- 1. /gacha (Member) ---
 
 @client.tree.command(name="gacha", description="Spend coins to pull a random card")
 async def gacha(interaction: discord.Interaction):
@@ -672,17 +642,6 @@ async def gacha(interaction: discord.Interaction):
 
 # --- 6. COMMANDS (REPLACEMENTS) ---
 
-@client.tree.command(name="drop", description="Admin: Public card drop")
-async def drop(interaction: discord.Interaction, name: str, quantity: int):
-    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!")
-    cursor.execute('SELECT * FROM cards WHERE name = ? OR card_id = ?', (name, name))
-    card = cursor.fetchone()
-    if not card: return await interaction.response.send_message("Card not found!")
-    embed = discord.Embed(title="🎁 PUBLIC DROP!", color=discord.Color.gold())
-    embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Quantity Remaining:** {quantity}", inline=False)
-    embed.set_image(url=card[4])
-    await interaction.channel.send(embed=embed, view=DropView(card, quantity))
-    await interaction.response.send_message("Drop sent!", ephemeral=True)
 
 @client.tree.command(name="trade", description="Sell cards for coins via DM")
 async def trade(interaction: discord.Interaction, user: discord.Member, card_name_or_id: str, trade_amount: int, quantity: int):
@@ -962,172 +921,19 @@ async def balance_rank(interaction: discord.Interaction):
 
 # --- PART 7: ADMIN UTILITIES ---
 
-@client.tree.command(name="set_channel", description="Admin: Set the default channel for bot announcements")
-async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-
-    # Save the channel ID to the config table
-    cursor.execute('''INSERT INTO config (key, value) VALUES (?, ?) 
-                      ON CONFLICT(key) DO UPDATE SET value = ?''', 
-                   ('default_channel', str(channel.id), str(channel.id)))
-    conn.commit()
-    
-    embed = discord.Embed(description=f"✅ Default announcement channel successfully set to {channel.mention}", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 @client.tree.command(name="clear_balance", description="Admin: Reset a user's coin balance to 0")
-async def clear_balance(interaction: discord.Interaction, user: discord.Member):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-    
-    cursor.execute('UPDATE users SET balance = 0 WHERE id = ?', (str(user.id),))
-    conn.commit()
-    
-    embed = discord.Embed(description=f"✅ Successfully cleared {user.mention}'s coin balance to 0 🪙.", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-@client.tree.command(name="clear_inventory", description="Admin: Remove all cards from a user's inventory")
-async def clear_inventory(interaction: discord.Interaction, user: discord.Member):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
-    
-    cursor.execute('DELETE FROM inventory WHERE user_id = ?', (str(user.id),))
-    conn.commit()
-    
-    embed = discord.Embed(description=f"✅ Successfully emptied {user.mention}'s card inventory.", color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
 
 # --- PART 8: ADMIN MANAGEMENT COMMANDS ---
 
-@client.tree.command(name="delete_card", description="Admin: Delete a card completely from the game")
-async def delete_card(interaction: discord.Interaction, card_name: str):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    
-    cursor.execute('SELECT card_id, name FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
-    card = cursor.fetchone()
-    if not card: 
-        return await interaction.response.send_message("❌ Card not found.", ephemeral=True)
-    
-    card_id, real_name = card[0], card[1]
-    
-    # Delete from everywhere so it doesn't break inventories or the market
-    cursor.execute('DELETE FROM cards WHERE card_id = ?', (card_id,))
-    cursor.execute('DELETE FROM inventory WHERE card_id = ?', (card_id,))
-    cursor.execute('DELETE FROM market WHERE card_id = ?', (card_id,))
-    conn.commit()
-    
-    await interaction.response.send_message(f"✅ Card **{real_name}** has been permanently deleted from the database, all inventories, and the market.", ephemeral=True)
-
-@client.tree.command(name="remove_coin", description="Admin: Remove coins from a user")
-async def remove_coin(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(user.id),))
-    row = cursor.fetchone()
-    balance = row[0] if row else 0
-    
-    if balance < amount:
-        err_embed = discord.Embed(description=f"{user.mention} doesn't have enough coin to remove.\n**Balance:** {balance} 🪙", color=discord.Color.red())
-        return await interaction.response.send_message(embed=err_embed)
-    
-    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, str(user.id)))
-    conn.commit()
-    
-    await interaction.response.send_message(f"✅ Successfully removed {amount} 🪙 from {user.mention}.", ephemeral=True)
-
-@client.tree.command(name="remove_card", description="Admin: Remove specific cards from a user")
-async def remove_card(interaction: discord.Interaction, user: discord.Member, card_name: str, quantity: int):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    
-    cursor.execute('''SELECT c.card_id, i.quantity, c.name FROM inventory i 
-                      JOIN cards c ON i.card_id = c.card_id 
-                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''', 
-                   (str(user.id), card_name, card_name))
-    card = cursor.fetchone()
-    
-    # Note: I used Color.red() here for errors. Change to Color.green() if you prefer!
-    if not card:
-        embed = discord.Embed(description=f"{user.mention} doesn't have that card to remove.", color=discord.Color.red())
-        return await interaction.response.send_message(embed=embed)
-        
-    if card[1] < quantity:
-        embed = discord.Embed(description=f"{user.mention} doesn't have enough card to remove.", color=discord.Color.red())
-        return await interaction.response.send_message(embed=embed)
-        
-    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(user.id), card[0]))
-    cursor.execute('DELETE FROM inventory WHERE quantity <= 0') # Clean up 0 quantity rows
-    conn.commit()
-    
-    await interaction.response.send_message(f"✅ Removed {quantity}x **{card[2]}** from {user.mention}'s inventory.", ephemeral=True)
-
-@client.tree.command(name="remove_rarity", description="Admin: Remove a rarity tier")
-async def remove_rarity(interaction: discord.Interaction, rarity: str):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    
-    cursor.execute('DELETE FROM rarities WHERE name = ?', (rarity,))
-    if cursor.rowcount == 0:
-        return await interaction.response.send_message(f"❌ Rarity **{rarity}** not found.", ephemeral=True)
-        
-    # Change affected cards to "Unknown"
-    cursor.execute('UPDATE cards SET rarity = "Unknown" WHERE rarity = ?', (rarity,))
-    conn.commit()
-    
-    await interaction.response.send_message(f"✅ Rarity **{rarity}** removed. Any affected cards now have 'Unknown' rarity.", ephemeral=True)
 
 @client.tree.command(name="edit", description="Admin: Edit an existing card's details")
-async def edit(interaction: discord.Interaction, card_name: str, new_name: str = None, rarity: str = None, value: int = None, image: str = None):
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    
-    cursor.execute('SELECT card_id, name, rarity, value, image FROM cards WHERE name = ? OR card_id = ?', (card_name, card_name))
-    card = cursor.fetchone()
-    
-    if not card: 
-        return await interaction.response.send_message("❌ Card not found.", ephemeral=True)
-    
-    card_id = card[0]
-    
-    # Keep the old values if the user didn't provide new ones
-    final_name = new_name if new_name else card[1]
-    final_rarity = rarity if rarity else card[2]
-    final_value = value if value is not None else card[3]
-    final_image = image if image else card[4]
-    
-    try:
-        cursor.execute('UPDATE cards SET name = ?, rarity = ?, value = ?, image = ? WHERE card_id = ?', 
-                       (final_name, final_rarity, final_value, final_image, card_id))
-        conn.commit()
-        await interaction.response.send_message(f"✅ Card **{card[1]}** updated successfully!", ephemeral=True)
-    except sqlite3.IntegrityError:
-        # This triggers if they try to rename it to a name that already exists
-        await interaction.response.send_message("❌ A card with that new name already exists!", ephemeral=True)
-    
+
 
 # --- PART 9: FINAL FEATURES ---
 
-@client.tree.command(name="add_rarity", description="Admin: Add a new rarity tier")
-async def add_rarity(interaction: discord.Interaction, name: str, drop_rate: float, colour: str):
-    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    if not (0 < drop_rate < 100): return await interaction.response.send_message("❌ Drop rate must be between 0 and 100 (exclusive)!", ephemeral=True)
-    
-    cursor.execute('INSERT INTO rarities (name, chance, color) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE SET chance = ?, color = ?', (name, drop_rate, colour, drop_rate, colour))
-    conn.commit()
-    await interaction.response.send_message(f"✅ Rarity **{name}** added with **{drop_rate}%** drop rate.", ephemeral=True)
 
-@client.tree.command(name="luck_amount", description="Admin: Set the gacha pull cost")
-async def luck_amount(interaction: discord.Interaction, amount: int):
-    if not interaction.user.guild_permissions.manage_guild: return await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-    cursor.execute("UPDATE config SET value = ? WHERE key = 'gacha_cost'", (str(amount),))
-    conn.commit()
-    await interaction.response.send_message(f"✅ Gacha cost updated to **{amount} 🪙**.", ephemeral=True)
 
 @client.tree.command(name="account", description="Set your account privacy")
 @app_commands.choices(status=[
@@ -1245,16 +1051,16 @@ async def help(interaction: discord.Interaction):
         "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the #**Anime TCG** channel. You can earn coins by chatting with others and by using member commands. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
         
         # Page 2: Economy & Basics
-        "**💰 Economy & Basics**\n\n**1. `/balance`**\nCheck your coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your current level/rank.",
+        "**💰 Economy & Basics**\n\n**1. `/balance`**\nCheck your coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your current level.\n\n**6. `/burn`**\nGet 50% of card value by burning card.",
         
         # Page 3: Gacha & Collecting
-        "**🎴 Gacha & Collecting**\n\n**6. `/gacha`**\nSpend coins to pull a random card.\n\n**7. `/inventory`**\nView your card collection.\n\n**8. `/card_list`**\nView all available cards in the bot.\n\n**9. `/view_card`**\nInspect a specific card's details and image.\n\n**10. `/rarity_list`**\nView all card rarities and drop chances.",
+        "**🎴 Gacha & Collecting**\n\n**7. `/gacha`**\nSpend coins to pull a random card.\n\n**8. `/inventory`**\nView your card collection.\n\n**9. `/card_list`**\nView all available cards in the bot.\n\n**10. `/view_card`**\nInspect a specific card's details and image.\n\n**11. `/rarity_list`**\nView all card rarities and drop chances.",
         
         # Page 4: Social & Trading
-        "**🤝 Social & Trading**\n\n**11. `/user_balance <user>`**\nCheck another member's balance.\n\n**12. `/user_inventory <user>`**\nView another member's collection.\n\n**13. `/gift_card`**\nGive a card to another player.\n\n**14. `/gift_coin`**\nGive coins to another player.\n\n**15. `/trade`**\nTrade cards with another player.",
+        "**🤝 Social & Trading**\n\n**12. `/user_balance <user>`**\nCheck another member's balance.\n\n**13. `/user_inventory <user>`**\nView another member's collection.\n\n**14. `/gift_card`**\nGive a card to another player.\n\n**15. `/gift_coin`**\nGive coins to another player.\n\n**16. `/trade`**\nTrade cards with another player.",
         
         # Page 5: Market & Leaderboards
-        "**⚖️ Market & Leaderboards**\n\n**16. `/market`**\nBrowse cards for sale.\n\n**17. `/market_sell`**\nPut a card up for sale.\n\n**18. `/remove_market`**\nCancel your market listing.\n\n**19. `/card_leaderboard`**\nSee who has the most/best cards.\n\n**20. `/user_leaderboard`**\nSee the top users overall.\n\n**21. `/balance_rank`**\nSee the richest users."
+        "**⚖️ Market & Leaderboards**\n\n**17. `/market`**\nBrowse cards for sale.\n\n**18. `/market_sell`**\nPut a card up for sale.\n\n**19. `/remove_market`**\nCancel your market listing.\n\n**20. `/card_leaderboard`**\nSee who has the most/best cards.\n\n**21. `/user_leaderboard`**\nSee the top users overall.\n\n**22. `/balance_rank`**\nSee the richest users."
     ]
     
     view = HelpPaginator(pages)
