@@ -920,14 +920,7 @@ async def balance_rank(interaction: discord.Interaction):
 # --- PART 7: ADMIN UTILITIES ---
 
 
-@client.tree.command(name="clear_balance", description="Admin: Reset a user's coin balance to 0")
-
-
 # --- PART 8: ADMIN MANAGEMENT COMMANDS ---
-
-
-@client.tree.command(name="edit", description="Admin: Edit an existing card's details")
-
 
 # --- PART 9: FINAL FEATURES ---
 
