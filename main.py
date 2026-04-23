@@ -714,6 +714,7 @@ async def card_list(interaction: discord.Interaction):
     await interaction.followup.send(embed=view.create_embed(), view=view)
  
     
+
     @app_commands.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
     @app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
     async def burn(self, interaction: discord.Interaction, card_name: str, quantity: int = 1):
@@ -781,7 +782,7 @@ async def card_list(interaction: discord.Interaction):
         except Exception as e:
             conn.rollback()
             await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
-
+        
          
                            
 # --- MARKET SYSTEM COMMANDS ---
