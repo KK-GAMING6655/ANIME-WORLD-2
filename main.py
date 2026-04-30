@@ -469,6 +469,53 @@ class HelpPaginator(ui.View):
         else: await interaction.response.defer()
         
 
+class BulkGachaView(discord.ui.View):
+    def __init__(self, user, results, total_pulls):
+        super().__init__(timeout=60)
+        self.user = user
+        self.results = results  # List of dictionaries containing card details
+        self.total_pulls = total_pulls
+        self.current_page = 0
+
+    def create_embed(self):
+        card = self.results[self.current_page]
+        # Create embed with the rarity color
+        color_hex = card['color'].replace("#", "0x")
+        embed = discord.Embed(
+            title="✨ GACHA PULL ✨",
+            description=f"Page {self.current_page + 1}/{self.total_pulls}",
+            color=discord.Color(int(color_hex, 16))
+        )
+        embed.add_field(name="Name", value=card['name'], inline=True)
+        embed.add_field(name="Rarity", value=card['rarity'], inline=True)
+        embed.add_field(name="Value", value=f"{card['value']} 🪙", inline=True)
+        embed.add_field(name="Card ID", value=f"`{card['card_id']}`", inline=True)
+        
+        if card['image']:
+            embed.set_image(url=card['image'])
+        
+        embed.set_footer(text=f"Collector: {self.user.name}")
+        return embed
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.gray)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.user:
+            await interaction.response.send_message("This gacha result isn't for you!", ephemeral=True)
+            return
+        
+        self.current_page = (self.current_page - 1) % self.total_pulls
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.gray)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.user:
+            await interaction.response.send_message("This gacha result isn't for you!", ephemeral=True)
+            return
+        
+        self.current_page = (self.current_page + 1) % self.total_pulls
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        
+
 # --- 5. BOT SETUP ---
 class GachaBot(discord.Client):
     def __init__(self):
@@ -1058,7 +1105,92 @@ async def help(interaction: discord.Interaction):
     # ephemeral=True ensures only the sender can see this yellow embed
     await interaction.response.send_message(embed=view.create_embed(), view=view, ephemeral=True)
             
-               
+
+@client.tree.command(name="bulk_gacha", description="Pull multiple cards at once")
+@app_commands.describe(no_of_pulls="Number of cards to pull (1-20)")
+async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
+    # 1. Validation for the Limit (20 cards)
+    if no_of_pulls > 20:
+        embed = discord.Embed(description="❌ You can't pull more than 20 cards at once.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if no_of_pulls <= 0:
+        await interaction.response.send_message("Please enter a number greater than 0.", ephemeral=True)
+        return
+
+    user_id = str(interaction.user.id)
+    gacha_cost = 1000 * no_of_pulls  # Assuming 1000 is the standard cost
+
+    # 2. Check Balance
+    cursor.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
+    user_data = cursor.fetchone()
+    balance = user_data[0] if user_data else 0
+
+    if balance < gacha_cost:
+        embed = discord.Embed(title="Insufficient Balance", color=discord.Color.red())
+        embed.description = f"Your balance is not enough.\n**Balance:** {balance} 🪙\n**Required:** {gacha_cost} 🪙"
+        await interaction.response.send_message(embed=embed)
+        return
+
+    # 3. Pulling Logic
+    # Fetch rarities for weighted random
+    cursor.execute('SELECT name, chance, color FROM rarities')
+    rarity_data = cursor.fetchall()
+    rarity_names = [r[0] for r in rarity_data]
+    rarity_chances = [r[1] for r in rarity_data]
+    rarity_colors = {r[0]: r[2] for r in rarity_data}
+
+    pull_results = []
+
+    try:
+        for _ in range(no_of_pulls):
+            # Select Rarity
+            rarity = random.choices(rarity_names, weights=rarity_chances, k=1)[0]
+            
+            # Select Random Card of that Rarity
+            cursor.execute('SELECT card_id, name, value, image FROM cards WHERE rarity = ?', (rarity,))
+            cards_of_rarity = cursor.fetchall()
+            
+            if not cards_of_rarity:
+                continue # Skip if no cards exist for this rarity
+                
+            card = random.choice(cards_of_rarity)
+            c_id, c_name, c_value, c_image = card
+
+            # 4. Inventory & Owners Update
+            cursor.execute('SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?', (user_id, c_id))
+            inv_item = cursor.fetchone()
+
+            if inv_item:
+                cursor.execute('UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND card_id = ?', (user_id, c_id))
+            else:
+                cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)', (user_id, c_id))
+                # Update owner count only if it's a new card for the user
+                cursor.execute('UPDATE cards SET owners = owners + 1 WHERE card_id = ?', (c_id,))
+
+            # Store result for the View
+            pull_results.append({
+                'card_id': c_id,
+                'name': c_name,
+                'rarity': rarity,
+                'value': c_value,
+                'image': c_image,
+                'color': rarity_colors[rarity]
+            })
+
+        # 5. Deduct Balance and Commit
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (gacha_cost, user_id))
+        conn.commit()
+
+        # 6. Send Response
+        view = BulkGachaView(interaction.user, pull_results, len(pull_results))
+        await interaction.response.send_message(f"🎉 {interaction.user.mention} pulled cards!", embed=view.create_embed(), view=view)
+
+    except Exception as e:
+        conn.rollback()
+        await interaction.response.send_message(f"An error occurred during bulk gacha: {e}", ephemeral=True)
+        
 
 if __name__ == '__main__':
     Thread(target=run_flask).start()
