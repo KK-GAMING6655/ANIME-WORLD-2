@@ -1166,9 +1166,7 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
                 cursor.execute('UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND card_id = ?', (user_id, c_id))
             else:
                 cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)', (user_id, c_id))
-                # Update owner count only if it's a new card for the user
-                cursor.execute('UPDATE cards SET owners = owners + 1 WHERE card_id = ?', (c_id,))
-
+                
             # Store result for the View
             pull_results.append({
                 'card_id': c_id,
