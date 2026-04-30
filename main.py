@@ -1105,11 +1105,10 @@ async def help(interaction: discord.Interaction):
     # ephemeral=True ensures only the sender can see this yellow embed
     await interaction.response.send_message(embed=view.create_embed(), view=view, ephemeral=True)
             
-
 @client.tree.command(name="bulk_gacha", description="Pull multiple cards at once")
 @app_commands.describe(no_of_pulls="Number of cards to pull (1-20)")
 async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
-    # 1. Validation for the Limit (20 cards)
+    # 1. Immediate validation
     if no_of_pulls > 20:
         embed = discord.Embed(description="❌ You can't pull more than 20 cards at once.", color=discord.Color.red())
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1119,10 +1118,13 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
         await interaction.response.send_message("Please enter a number greater than 0.", ephemeral=True)
         return
 
-    user_id = str(interaction.user.id)
-    gacha_cost = 1000 * no_of_pulls  # Assuming 1000 is the standard cost
+    # 2. Tell Discord to wait (This stops the "Application not responding" error)
+    await interaction.response.defer()
 
-    # 2. Check Balance
+    user_id = str(interaction.user.id)
+    gacha_cost = 1000 * no_of_pulls
+
+    # 3. Check Balance
     cursor.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
     user_data = cursor.fetchone()
     balance = user_data[0] if user_data else 0
@@ -1130,11 +1132,11 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
     if balance < gacha_cost:
         embed = discord.Embed(title="Insufficient Balance", color=discord.Color.red())
         embed.description = f"Your balance is not enough.\n**Balance:** {balance} 🪙\n**Required:** {gacha_cost} 🪙"
-        await interaction.response.send_message(embed=embed)
+        # Since we deferred, we must use followup.send
+        await interaction.followup.send(embed=embed)
         return
 
-    # 3. Pulling Logic
-    # Fetch rarities for weighted random
+    # 4. Pulling Logic
     cursor.execute('SELECT name, chance, color FROM rarities')
     rarity_data = cursor.fetchall()
     rarity_names = [r[0] for r in rarity_data]
@@ -1145,20 +1147,15 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
 
     try:
         for _ in range(no_of_pulls):
-            # Select Rarity
             rarity = random.choices(rarity_names, weights=rarity_chances, k=1)[0]
-            
-            # Select Random Card of that Rarity
             cursor.execute('SELECT card_id, name, value, image FROM cards WHERE rarity = ?', (rarity,))
             cards_of_rarity = cursor.fetchall()
             
-            if not cards_of_rarity:
-                continue # Skip if no cards exist for this rarity
+            if not cards_of_rarity: continue
                 
             card = random.choice(cards_of_rarity)
             c_id, c_name, c_value, c_image = card
 
-            # 4. Inventory & Owners Update
             cursor.execute('SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?', (user_id, c_id))
             inv_item = cursor.fetchone()
 
@@ -1166,15 +1163,11 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
                 cursor.execute('UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND card_id = ?', (user_id, c_id))
             else:
                 cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)', (user_id, c_id))
-                
-            # Store result for the View
+                # The 'owners' update line is removed here to prevent the SQLite error
+
             pull_results.append({
-                'card_id': c_id,
-                'name': c_name,
-                'rarity': rarity,
-                'value': c_value,
-                'image': c_image,
-                'color': rarity_colors[rarity]
+                'card_id': c_id, 'name': c_name, 'rarity': rarity,
+                'value': c_value, 'image': c_image, 'color': rarity_colors[rarity]
             })
 
         # 5. Deduct Balance and Commit
@@ -1183,11 +1176,12 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
 
         # 6. Send Response
         view = BulkGachaView(interaction.user, pull_results, len(pull_results))
-        await interaction.response.send_message(f"🎉 {interaction.user.mention} pulled cards!", embed=view.create_embed(), view=view)
+        await interaction.followup.send(f"🎉 {interaction.user.mention} pulled cards!", embed=view.create_embed(), view=view)
 
     except Exception as e:
         conn.rollback()
-        await interaction.response.send_message(f"An error occurred during bulk gacha: {e}", ephemeral=True)
+        # Since we deferred, we must use followup.send
+        await interaction.followup.send(f"An error occurred during bulk gacha: {e}")
         
 
 if __name__ == '__main__':
