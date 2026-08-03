@@ -53,6 +53,11 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN last_beg TIMESTAMP")
     if "last_daily" not in existing_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN last_daily TIMESTAMP")
+    if "web_id" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN web_id TEXT")
+    if "web_password" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN web_password TEXT")
+    
 
     # 3. Default Settings
     cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('gacha_cost', '1000')")
@@ -1027,6 +1032,52 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
     view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
     await interaction.followup.send(embed=view.create_embed(), view=view)
     
+@client.tree.command(name="login", description="Get your Web Portal ID and Password")
+async def login(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    user_id = str(interaction.user.id)
+    
+    # Check if user already has an ID and Password
+    cursor.execute("SELECT web_id, web_password FROM users WHERE id = ?", (user_id,))
+    row = cursor.fetchone()
+    
+    if row and row[0] and row[1]:
+        web_id, web_pass = row[0], row[1]
+    else:
+        # Generate unique 10-digit ID and 4-digit PIN
+        while True:
+            new_id = "".join([str(random.randint(0, 9)) for _ in range(10)])
+            cursor.execute("SELECT id FROM users WHERE web_id = ?", (new_id,))
+            if not cursor.fetchone(): 
+                break
+        new_pass = "".join([str(random.randint(0, 9)) for _ in range(4)])
+        
+        cursor.execute("""
+            INSERT INTO users (id, web_id, web_password) VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET web_id = ?, web_password = ?
+        """, (user_id, new_id, new_pass, new_id, new_pass))
+        conn.commit()
+        web_id, web_pass = new_id, new_pass
+
+    # Replace YOUR_WEBSITE_LINK_HERE with your deployed Vercel site URL
+    WEBSITE_URL = "https://animetcg.vercel.app"
+
+    embed = discord.Embed(
+        title="🔑 Web Portal Login Credentials",
+        description="Click on the ID and Password below to copy them to your clipboard!",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Id", value=f"`{web_id}`", inline=True)
+    embed.add_field(name="Password", value=f"`{web_pass}`", inline=True)
+    embed.add_field(
+        name="Link", 
+        value=f"[Open website]({WEBSITE_URL})", 
+        inline=False
+    )
+    embed.set_footer(text="Keep your password private!")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+        
+
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
