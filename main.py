@@ -57,6 +57,11 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN web_id TEXT")
     if "web_password" not in existing_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN web_password TEXT")
+    if "username" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
+    if "pfp" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN pfp TEXT")
+    
     
 
     # 3. Default Settings
@@ -1032,6 +1037,7 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
     view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
     await interaction.followup.send(embed=view.create_embed(), view=view)
     
+
 @client.tree.command(name="login", description="Get your Web Portal ID and Password")
 async def login(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -1060,7 +1066,7 @@ async def login(interaction: discord.Interaction):
         web_id, web_pass = new_id, new_pass
 
     # Replace YOUR_WEBSITE_LINK_HERE with your deployed Vercel site URL
-    WEBSITE_URL = "https://animetcg.vercel.app"
+    WEBSITE_URL = "https://your-website-link.vercel.app"
 
     embed = discord.Embed(
         title="🔑 Web Portal Login Credentials",
@@ -1076,8 +1082,7 @@ async def login(interaction: discord.Interaction):
     )
     embed.set_footer(text="Keep your password private!")
     await interaction.followup.send(embed=embed, ephemeral=True)
-        
-
+    
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
