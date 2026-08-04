@@ -1042,6 +1042,8 @@ async def user_inventory(interaction: discord.Interaction, user: discord.Member)
 async def login(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
+    username = interaction.user.name
+    pfp = interaction.user.display_avatar.url
     
     # Check if user already has an ID and Password
     cursor.execute("SELECT web_id, web_password FROM users WHERE id = ?", (user_id,))
@@ -1049,8 +1051,14 @@ async def login(interaction: discord.Interaction):
     
     if row and row[0] and row[1]:
         web_id, web_pass = row[0], row[1]
+        
+        # Existing user: update their username and pfp to match their current Discord profile
+        cursor.execute("""
+            UPDATE users SET username = ?, pfp = ? WHERE id = ?
+        """, (username, pfp, user_id))
+        conn.commit()
     else:
-        # Generate unique 10-digit ID and 4-digit PIN
+        # New user: generate unique 10-digit ID and 4-digit PIN
         while True:
             new_id = "".join([str(random.randint(0, 9)) for _ in range(10)])
             cursor.execute("SELECT id FROM users WHERE web_id = ?", (new_id,))
@@ -1058,15 +1066,20 @@ async def login(interaction: discord.Interaction):
                 break
         new_pass = "".join([str(random.randint(0, 9)) for _ in range(4)])
         
+        # Insert user along with initial credentials, username, and pfp
         cursor.execute("""
-            INSERT INTO users (id, web_id, web_password) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET web_id = ?, web_password = ?
-        """, (user_id, new_id, new_pass, new_id, new_pass))
+            INSERT INTO users (id, web_id, web_password, username, pfp) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET 
+                web_id = ?, 
+                web_password = ?, 
+                username = ?, 
+                pfp = ?
+        """, (user_id, new_id, new_pass, username, pfp, new_id, new_pass, username, pfp))
         conn.commit()
         web_id, web_pass = new_id, new_pass
 
     # Replace YOUR_WEBSITE_LINK_HERE with your deployed Vercel site URL
-    WEBSITE_URL = "https://your-website-link.vercel.app"
+    WEBSITE_URL = "https://animetcg.vercel.app"
 
     embed = discord.Embed(
         title="🔑 Web Portal Login Credentials",
@@ -1082,7 +1095,7 @@ async def login(interaction: discord.Interaction):
     )
     embed.set_footer(text="Keep your password private!")
     await interaction.followup.send(embed=embed, ephemeral=True)
-    
+        
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
