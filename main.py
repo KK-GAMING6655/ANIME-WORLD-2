@@ -6,6 +6,10 @@ import random
 from flask import Flask
 from threading import Thread
 import datetime
+import asyncio
+import urllib.request
+import urllib.parse
+
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
 @app.route('/')
@@ -560,6 +564,31 @@ async def on_message(message):
     cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
     conn.commit()
 
+
+def upload_to_catbox_sync(image_url: str) -> str:
+    catbox_url = "https://catbox.moe/user/api.php"
+    data = urllib.parse.urlencode({
+        "reqtype": "urlupload",
+        "url": image_url
+    }).encode("utf-8")
+    
+    req = urllib.request.Request(
+        catbox_url, 
+        data=data, 
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = response.read().decode("utf-8").strip()
+            if result.startswith("https://files.catbox.moe/"):
+                return result
+    except Exception as e:
+        print(f"Catbox upload failed: {e}")
+        
+    return image_url  # Fallback to Discord CDN URL if Catbox fails
+    
+
 # --- 6. COMMANDS ---
 
 @client.tree.command(name="card_leaderboard", description="View cards ranked by value")
@@ -1043,7 +1072,10 @@ async def login(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
     username = interaction.user.name
-    pfp = interaction.user.display_avatar.url
+    
+    # Run the upload in a non-blocking background thread
+    discord_pfp = interaction.user.display_avatar.url
+    pfp = await asyncio.to_thread(upload_to_catbox_sync, discord_pfp)
     
     # Check if user already has an ID and Password
     cursor.execute("SELECT web_id, web_password FROM users WHERE id = ?", (user_id,))
@@ -1052,7 +1084,7 @@ async def login(interaction: discord.Interaction):
     if row and row[0] and row[1]:
         web_id, web_pass = row[0], row[1]
         
-        # Existing user: update their username and pfp to match their current Discord profile
+        # Existing user: update username and permanent catbox PFP
         cursor.execute("""
             UPDATE users SET username = ?, pfp = ? WHERE id = ?
         """, (username, pfp, user_id))
@@ -1066,7 +1098,7 @@ async def login(interaction: discord.Interaction):
                 break
         new_pass = "".join([str(random.randint(0, 9)) for _ in range(4)])
         
-        # Insert user along with initial credentials, username, and pfp
+        # Insert user along with initial credentials, username, and permanent pfp
         cursor.execute("""
             INSERT INTO users (id, web_id, web_password, username, pfp) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET 
@@ -1078,8 +1110,7 @@ async def login(interaction: discord.Interaction):
         conn.commit()
         web_id, web_pass = new_id, new_pass
 
-    # Replace YOUR_WEBSITE_LINK_HERE with your deployed Vercel site URL
-    WEBSITE_URL = "https://animetcg.vercel.app"
+    WEBSITE_URL = "https://your-website-link.vercel.app"
 
     embed = discord.Embed(
         title="🔑 Web Portal Login Credentials",
@@ -1095,7 +1126,7 @@ async def login(interaction: discord.Interaction):
     )
     embed.set_footer(text="Keep your password private!")
     await interaction.followup.send(embed=embed, ephemeral=True)
-        
+    
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
