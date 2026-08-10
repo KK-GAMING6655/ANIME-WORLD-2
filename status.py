@@ -4,8 +4,8 @@ from discord.ext import tasks
 # -------------------------------------------------------------
 # ⚙️ CONFIGURATION: PASTE YOUR VOICE / TEXT CHANNEL IDs HERE
 # -------------------------------------------------------------
-SERVERS_CHANNEL_ID = 123456789012345678  # Replace with your Server Count Channel ID
-USERS_CHANNEL_ID = 987654321098765432    # Replace with your User Count Channel ID
+SERVERS_CHANNEL_ID = 1536432004596498452  # Replace with your Server Count Channel ID
+USERS_CHANNEL_ID = 1536431861293785098    # Replace with your User Count Channel ID
 
 
 @tasks.loop(minutes=30)
@@ -23,14 +23,14 @@ async def update_status_channels(client, cursor):
         # 3. Update the Server Count channel
         servers_channel = client.get_channel(SERVERS_CHANNEL_ID)
         if servers_channel:
-            new_server_name = f"🌐 Servers: {server_count}"
+            new_server_name = f"Servers: {server_count}🌐"
             if servers_channel.name != new_server_name:
                 await servers_channel.edit(name=new_server_name)
 
         # 4. Update the User Count channel
         users_channel = client.get_channel(USERS_CHANNEL_ID)
         if users_channel:
-            new_user_name = f"👥 Users: {user_count}"
+            new_user_name = f"Users: {user_count}👥"
             if users_channel.name != new_user_name:
                 await users_channel.edit(name=new_user_name)
 
