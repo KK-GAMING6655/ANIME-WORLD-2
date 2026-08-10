@@ -9,6 +9,7 @@ import datetime
 import asyncio
 import urllib.request
 import urllib.parse
+from status import update_status_channels
 
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
@@ -549,12 +550,15 @@ client = GachaBot()
 async def on_ready():
     print(f'Logged in as {client.user} (ID: {client.user.id})')
     print('------')
-    # This is the "Force Sync" that fixes the "Not Responding" error
     try:
         synced = await client.tree.sync()
         print(f"Synced {len(synced)} command(s) successfully!")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+
+    # Start the 30-minute status loop if it isn't running already
+    if not update_status_channels.is_running():
+        update_status_channels.start(client, cursor)
         
 
 @client.event
