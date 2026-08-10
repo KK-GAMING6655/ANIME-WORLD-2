@@ -1182,6 +1182,50 @@ async def daily(interaction: discord.Interaction):
     embed = discord.Embed(description=f"{interaction.user.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
     await interaction.followup.send(embed=embed)
 
+
+@client.tree.command(name="cointoss", description="Bet your coins on a coin flip")
+@app_commands.describe(amount="Amount of coins to bet", call="Your call")
+@app_commands.choices(call=[
+    app_commands.Choice(name="Head", value="Head"),
+    app_commands.Choice(name="Tail", value="Tail")
+])
+async def cointoss(interaction: discord.Interaction, amount: int, call: app_commands.Choice[str]):
+    await interaction.response.defer()
+
+    user_id = str(interaction.user.id)
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+
+    if amount <= 0 or amount > balance:
+        embed = discord.Embed(
+            description=f"❌ You have insufficient balance.\n**Your balance:** {balance} 🪙",
+            color=discord.Color.red()
+        )
+        return await interaction.followup.send(embed=embed, ephemeral=True)
+
+    outcome = random.choice(["Head", "Tail"])
+    user_call = call.value
+
+    if outcome == user_call:
+        winnings = amount * 2
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (winnings - amount, user_id))
+        conn.commit()
+        embed = discord.Embed(
+            description=f"It was **{outcome}** and your call was **{user_call}**\nYou won **{winnings}** 🪙",
+            color=discord.Color.green()
+        )
+    else:
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, user_id))
+        conn.commit()
+        embed = discord.Embed(
+            description=f"It was **{outcome}** and your call was **{user_call}**\nYou lost **{amount}** 🪙",
+            color=discord.Color.red()
+        )
+
+    await interaction.followup.send(embed=embed)
+
+
 @client.tree.command(name="help", description="List all available commands and how to play")
 async def help(interaction: discord.Interaction):
     pages = [
