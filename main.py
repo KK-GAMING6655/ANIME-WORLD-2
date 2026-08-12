@@ -119,7 +119,7 @@ def get_all_leaderboard_data():
 #--- 4. UI CLASSES ---
 class CardPaginator(ui.View):
     def __init__(self, cards, start_index, title_prefix="Card"):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.cards = cards
         self.current_page = start_index
         self.title_prefix = title_prefix
@@ -228,7 +228,7 @@ class DropView(ui.View):
 # NEW: SaleView for DM trading
 class SaleView(ui.View):
     def __init__(self, seller, buyer, card, price, quantity):
-        super().__init__(timeout=3600)
+        super().__init__(timeout=None)
         self.seller, self.buyer, self.card, self.price, self.qty = seller, buyer, card, price, quantity
 
     @ui.button(label="✅ Accept", style=discord.ButtonStyle.green)
@@ -291,7 +291,7 @@ class UserLeaderboardPaginator(ui.View):
 
 class TradeView(ui.View):
     def __init__(self, sender, receiver, sender_card, receiver_card):
-        super().__init__(timeout=120)
+        super().__init__(timeout=None)
         self.sender = sender
         self.receiver = receiver
         self.sender_card = sender_card # (id, name)
@@ -459,7 +459,7 @@ class MarketPaginator(ui.View):
 
 class HelpPaginator(ui.View):
     def __init__(self, pages):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)
         self.pages = pages
         self.current_page = 0
 
