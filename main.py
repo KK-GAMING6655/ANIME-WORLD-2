@@ -567,29 +567,6 @@ async def on_message(message):
     conn.commit()
 
 
-def upload_to_catbox_sync(image_url: str) -> str:
-    catbox_url = "https://catbox.moe/user/api.php"
-    data = urllib.parse.urlencode({
-        "reqtype": "urlupload",
-        "url": image_url
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        catbox_url, 
-        data=data, 
-        headers={"User-Agent": "Mozilla/5.0"}
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = response.read().decode("utf-8").strip()
-            if result.startswith("https://files.catbox.moe/"):
-                return result
-    except Exception as e:
-        print(f"Catbox upload failed: {e}")
-        
-    return image_url  # Fallback to Discord CDN URL if Catbox fails
-    
 
 # --- 6. COMMANDS ---
 
