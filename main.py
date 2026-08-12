@@ -561,8 +561,9 @@ async def on_ready():
 @client.event
 async def on_message(message):
     if message.author.bot: return
-    c = random.randint(10, 50)
-    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
+    c = random.randint(10, 200)
+    local_cursor = conn.cursor()
+    local_cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
     conn.commit()
 
 
