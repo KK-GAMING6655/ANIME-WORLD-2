@@ -573,6 +573,28 @@ async def on_message(message):
 
 
 
+#CARD CHOICE 
+async def card_name_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM cards WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+    rows = local_cursor.fetchall()
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
+
+
+async def owned_card_autocomplete(interaction: discord.Interaction, current: str):
+    user_id = str(interaction.user.id)
+    local_cursor = conn.cursor()
+    local_cursor.execute("""
+        SELECT c.name FROM cards c
+        JOIN inventory i ON c.card_id = i.card_id
+        WHERE i.user_id = ? AND c.name LIKE ?
+        ORDER BY c.name LIMIT 25
+    """, (user_id, f"%{current}%"))
+    rows = local_cursor.fetchall()
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
+
+
+
 # --- 6. COMMANDS ---
 
 @client.tree.command(name="card_leaderboard", description="View cards ranked by value")
@@ -624,6 +646,7 @@ async def inventory(interaction: discord.Interaction):
 # --- 1. /addcoin (Admin) ---
 
 # --- 2. /view_card (Member) ---
+@app_commands.autocomplete(query=card_name_autocomplete)
 @client.tree.command(name="view_card", description="View details of a specific card")
 async def view_card(interaction: discord.Interaction, query: str):
     await interaction.response.defer(ephemeral=True)
@@ -743,6 +766,7 @@ async def card_list(interaction: discord.Interaction):
 
 @client.tree.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
 @app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
+@app_commands.autocomplete(card_name=owned_card_autocomplete)
 async def burn(interaction: discord.Interaction, card_name: str, quantity: int = 1):
     if quantity <= 0:
         await interaction.response.send_message("Quantity must be at least 1.", ephemeral=True)
@@ -801,6 +825,7 @@ async def burn(interaction: discord.Interaction, card_name: str, quantity: int =
     
 
 # --- MARKET SYSTEM COMMANDS ---
+@app_commands.autocomplete(card_name=owned_card_autocomplete)
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
 async def market_sell(interaction: discord.Interaction, card_name: str, price: int, quantity: int = 1):
     if price < 0 or quantity <= 0:
