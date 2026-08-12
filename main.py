@@ -547,6 +547,7 @@ client = GachaBot()
 
 @client.event
 async def on_ready():
+    
     print(f'Logged in as {client.user} (ID: {client.user.id})')
     print('------')
     # This is the "Force Sync" that fixes the "Not Responding" error
@@ -556,6 +557,10 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
+    await client.change_presence(
+    status=discord.Status.online,
+    activity=discord.Activity(type=discord.ActivityType.playing, name="Anime TCG | /help")
+    )
 
 
 @client.event
