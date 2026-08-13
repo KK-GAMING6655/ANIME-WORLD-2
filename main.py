@@ -47,6 +47,16 @@ def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS market (selling_id INTEGER PRIMARY KEY AUTOINCREMENT, seller_id TEXT, card_id TEXT, price INTEGER, quantity INTEGER)')
     cursor.execute('CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)')
 
+
+    cursor.execute('CREATE TABLE IF NOT EXISTS anime (name TEXT)')
+
+    cursor.execute("PRAGMA table_info(cards)")
+    cards_columns = [column[1] for column in cursor.fetchall()]
+    if "anime" not in cards_columns:
+        cursor.execute("ALTER TABLE cards ADD COLUMN anime TEXT")
+
+    
+
     # 2. AUTO-REPAIR: Ensure columns exist in the cloud
     cursor.execute("PRAGMA table_info(users)")
     existing_columns = [column[1] for column in cursor.fetchall()]
@@ -610,6 +620,18 @@ async def own_listing_autocomplete(interaction: discord.Interaction, current: st
         if current.lower() in name.lower()
     ]
 
+async def rarity_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM rarities WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
+
+
+async def anime_autocomplete(interaction: discord.Interaction, current: str):
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM anime WHERE name LIKE ? ORDER BY name LIMIT 25", (f"%{current}%",))
+    return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
+
+
 
 # --- 6. COMMANDS ---
 
@@ -653,7 +675,7 @@ async def rank(interaction: discord.Interaction):
 @client.tree.command(name="inventory", description="View your collection")
 async def inventory(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(interaction.user.id),))
+    cursor.execute('SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(interaction.user.id),))
     items = cursor.fetchall()
     if not items: return await interaction.followup.send("Inventory empty.")
     view = CardPaginator(items, 0, "Your Collection")
@@ -753,7 +775,7 @@ async def gacha(interaction: discord.Interaction):
 @client.tree.command(name="trade", description="Sell cards for coins via DM")
 async def trade(interaction: discord.Interaction, user: discord.Member, card_name_or_id: str, trade_amount: int, quantity: int):
     await interaction.response.defer(ephemeral=True)
-    cursor.execute('SELECT c.*, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)', (str(interaction.user.id), card_name_or_id, card_name_or_id))
+    cursor.execute('SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)', (str(interaction.user.id), card_name_or_id, card_name_or_id))
     card = cursor.fetchone()
     if not card or card[5] < quantity: return await interaction.followup.send("❌ You don't have enough copies!")
     embed = discord.Embed(title="🤝 Trade Offer", color=discord.Color.blue())
@@ -764,21 +786,76 @@ async def trade(interaction: discord.Interaction, user: discord.Member, card_nam
         await interaction.followup.send(f"✅ Offer sent to {user.name}!")
     except: await interaction.followup.send("❌ User has DMs closed!")
 
-@client.tree.command(name="card_list", description="Admin: Sorted card list")
-async def card_list(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    if not interaction.user.guild_permissions.manage_guild: 
-        return await interaction.followup.send("❌ Admin!")
-    
-    cursor.execute('SELECT * FROM cards')
-    cards = cursor.fetchall()
-    
-    # Restores your original rarity sorting
-    sorted_cards = sorted(cards, key=lambda x: RARITY_ORDER.get(x[2], 99))
-    
-    view = CardPaginator(sorted_cards, 0, "Global List")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
+@client.tree.command(name="card_list", description="Browse all cards with sorting and filters")
+@app_commands.describe(
+    sort="How to sort the list",
+    rarity="Filter by rarity",
+    anime="Filter by anime",
+    minimum_value="Only show cards worth at least this much",
+    maximum_value="Only show cards worth at most this much"
+)
+@app_commands.choices(sort=[
+    app_commands.Choice(name="Low to High Value", value="value_asc"),
+    app_commands.Choice(name="High to Low Value", value="value_desc"),
+    app_commands.Choice(name="Low to High ID", value="id_asc"),
+    app_commands.Choice(name="High to Low ID", value="id_desc"),
+])
+@app_commands.autocomplete(rarity=rarity_autocomplete, anime=anime_autocomplete)
+async def card_list(
+    interaction: discord.Interaction,
+    sort: app_commands.Choice[str],
+    rarity: str = None,
+    anime: str = None,
+    minimum_value: int = None,
+    maximum_value: int = None
+):
+    await interaction.response.defer()
+    local_cursor = conn.cursor()
 
+    if rarity is not None:
+        local_cursor.execute("SELECT 1 FROM rarities WHERE name = ?", (rarity,))
+        if not local_cursor.fetchone():
+            embed = discord.Embed(description=f"❌ **{rarity}** is not a valid rarity.", color=discord.Color.red())
+            return await interaction.followup.send(embed=embed)
+
+    if anime is not None:
+        local_cursor.execute("SELECT 1 FROM anime WHERE name = ?", (anime,))
+        if not local_cursor.fetchone():
+            embed = discord.Embed(description=f"❌ **{anime}** is not a valid anime.", color=discord.Color.red())
+            return await interaction.followup.send(embed=embed)
+
+    if minimum_value is not None and maximum_value is not None and minimum_value > maximum_value:
+        embed = discord.Embed(description="❌ Minimum value can't be greater than maximum value.", color=discord.Color.red())
+        return await interaction.followup.send(embed=embed)
+
+    query = "SELECT card_id, name, rarity, value, image, anime FROM cards WHERE 1=1"
+    params = []
+    if rarity is not None:
+        query += " AND rarity = ?"; params.append(rarity)
+    if anime is not None:
+        query += " AND anime = ?"; params.append(anime)
+    if minimum_value is not None:
+        query += " AND value >= ?"; params.append(minimum_value)
+    if maximum_value is not None:
+        query += " AND value <= ?"; params.append(maximum_value)
+
+    sort_map = {
+        "value_asc": " ORDER BY value ASC",
+        "value_desc": " ORDER BY value DESC",
+        "id_asc": " ORDER BY CAST(card_id AS INTEGER) ASC",
+        "id_desc": " ORDER BY CAST(card_id AS INTEGER) DESC",
+    }
+    query += sort_map[sort.value]
+
+    local_cursor.execute(query, params)
+    cards = local_cursor.fetchall()
+
+    if not cards:
+        embed = discord.Embed(description="⚠️ No cards match those filters.", color=discord.Color.orange())
+        return await interaction.followup.send(embed=embed)
+
+    view = CardPaginator(cards, 0, "Card List")
+    await interaction.followup.send(embed=view.create_embed(), view=view)
 
 @client.tree.command(name="burn", description="Burn your cards to receive 50% of their value in coins")
 @app_commands.describe(card_name="Name or ID of the card to burn", quantity="How many to burn")
