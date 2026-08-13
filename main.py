@@ -594,6 +594,22 @@ async def owned_card_autocomplete(interaction: discord.Interaction, current: str
     return [app_commands.Choice(name=row[0], value=row[0]) for row in rows]
 
 
+async def own_listing_autocomplete(interaction: discord.Interaction, current: str):
+    user_id = str(interaction.user.id)
+    local_cursor = conn.cursor()
+    local_cursor.execute("""
+        SELECT m.selling_id, c.name, m.price, m.quantity FROM market m
+        JOIN cards c ON m.card_id = c.card_id
+        WHERE m.seller_id = ?
+        ORDER BY c.name LIMIT 25
+    """, (user_id,))
+    rows = local_cursor.fetchall()
+    return [
+        app_commands.Choice(name=f"{name} — {price}🪙 x{qty}", value=selling_id)
+        for selling_id, name, price, qty in rows
+        if current.lower() in name.lower()
+    ]
+
 
 # --- 6. COMMANDS ---
 
@@ -871,6 +887,8 @@ async def market(interaction: discord.Interaction):
     view = MarketPaginator(listings, client)
     await interaction.followup.send(embed=await view.create_embed(), view=view)
 
+
+@app_commands.autocomplete(id=own_listing_autocomplete)
 @client.tree.command(name="remove_market", description="Remove your card from the market")
 async def remove_market(interaction: discord.Interaction, id: int):
     await interaction.response.defer(ephemeral=True)
@@ -897,7 +915,7 @@ async def remove_market(interaction: discord.Interaction, id: int):
     await interaction.followup.send(embed=success_embed)
     
 # --- PART 6: GIFTING & LEADERBOARDS ---
-
+@app_commands.autocomplete(card_name=owned_card_autocomplete)
 @client.tree.command(name="gift_card", description="Gift a card to a user for free")
 async def gift_card(interaction: discord.Interaction, user: discord.Member, card_name: str, quantity: int):
     await interaction.response.defer(ephemeral=True)
