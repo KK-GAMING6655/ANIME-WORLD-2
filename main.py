@@ -232,7 +232,7 @@ class CrateSelect(discord.ui.Select):
             new_balance = local_cursor.fetchone()[0]
 
             embed = discord.Embed(
-                description=f"📦 **{interaction.user.display_name}** opened **{crate_name}** and received **{amount}** 🪙.\n**Balance:** {new_balance} 🪙.",
+                description=f"<:crate:1537797263714295819> **{interaction.user.display_name}** opened **{crate_name}** and received **{amount}** 🪙.\n**Balance:** {new_balance} 🪙.",
                 color=discord.Color.gold()
             )
             await interaction.response.edit_message(embed=embed, view=None)
@@ -256,7 +256,7 @@ class CrateSelect(discord.ui.Select):
 
             embed = discord.Embed(
                 description=(
-                    f"📦 **{interaction.user.display_name}** opened **{crate_name}** and received **{card_name}**\n\n"
+                    f"<:crate:1537797263714295819> **{interaction.user.display_name}** opened **{crate_name}** and received **{card_name}**\n\n"
                     f"**{card_name}**\nRarity: {rarity}\nValue: {card_value}\nAnime: {anime or 'Unknown'}\n"
                     f"Card ID: {card_id}\nQuantity: {total_qty}"
                 ),
@@ -1218,7 +1218,7 @@ async def crate(interaction: discord.Interaction):
     if not crates:
         return await interaction.followup.send(embed=discord.Embed(description="❌ You don't have any crates to open.", color=discord.Color.red()))
 
-    embed = discord.Embed(title="Open a Crate 📦", description="Select a crate from below to open it.", color=discord.Color.red())
+    embed = discord.Embed(title="Open a Crate <:crate:1537797263714295819>", description="Select a crate from below to open it.", color=discord.Color.red())
     await interaction.followup.send(embed=embed, view=CrateOpenView(interaction.user.id, crates))
 
 
