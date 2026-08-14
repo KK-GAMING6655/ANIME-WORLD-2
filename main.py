@@ -55,6 +55,16 @@ def init_db():
     if "anime" not in cards_columns:
         cursor.execute("ALTER TABLE cards ADD COLUMN anime TEXT")
 
+
+    cursor.execute('CREATE TABLE IF NOT EXISTS Crate (crate_id TEXT PRIMARY KEY, crate_name TEXT, crate_type TEXT, value TEXT)')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS crate_inventory (
+                        user_id TEXT,
+                        crate_id TEXT,
+                        quantity INTEGER DEFAULT 1,
+                        UNIQUE(user_id, crate_id))''')
+
+    
+
     
 
     # 2. AUTO-REPAIR: Ensure columns exist in the cloud
@@ -180,6 +190,87 @@ class CardPaginator(ui.View):
             self.current_page += 1
             await interaction.response.edit_message(embed=self.create_embed(), view=self)
         else: await interaction.response.defer()
+
+
+
+
+class CrateSelect(discord.ui.Select):
+    def __init__(self, owner_id, crates):
+        options = [discord.SelectOption(label=f"{name} - {qty}×", value=crate_id) for crate_id, name, qty in crates]
+        super().__init__(placeholder="Select Crate", min_values=1, max_values=1, options=options)
+        self.owner_id = owner_id
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ This isn't your crate menu.", ephemeral=True)
+
+        crate_id = self.values[0]
+        local_cursor = conn.cursor()
+
+        local_cursor.execute("SELECT quantity FROM crate_inventory WHERE user_id = ? AND crate_id = ?", (str(interaction.user.id), crate_id))
+        row = local_cursor.fetchone()
+        if not row or row[0] <= 0:
+            return await interaction.response.send_message("❌ You no longer have that crate.", ephemeral=True)
+
+        local_cursor.execute("SELECT crate_name, crate_type, value FROM Crate WHERE crate_id = ?", (crate_id,))
+        crate = local_cursor.fetchone()
+        if not crate:
+            return await interaction.response.send_message("❌ That crate no longer exists.", ephemeral=True)
+        crate_name, crate_type, value = crate
+
+        if row[0] - 1 <= 0:
+            local_cursor.execute("DELETE FROM crate_inventory WHERE user_id = ? AND crate_id = ?", (str(interaction.user.id), crate_id))
+        else:
+            local_cursor.execute("UPDATE crate_inventory SET quantity = quantity - 1 WHERE user_id = ? AND crate_id = ?", (str(interaction.user.id), crate_id))
+        conn.commit()
+
+        if crate_type == "Coins":
+            amount = int(value)
+            local_cursor.execute("INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?", (str(interaction.user.id), amount, amount))
+            conn.commit()
+            local_cursor.execute("SELECT balance FROM users WHERE id = ?", (str(interaction.user.id),))
+            new_balance = local_cursor.fetchone()[0]
+
+            embed = discord.Embed(
+                description=f"📦 **{interaction.user.display_name}** opened **{crate_name}** and received **{amount}** 🪙.\n**Balance:** {new_balance} 🪙.",
+                color=discord.Color.gold()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+
+        else:
+            local_cursor.execute("SELECT card_id, name, rarity, value, image, anime FROM cards WHERE name = ?", (value,))
+            card = local_cursor.fetchone()
+            if not card:
+                embed = discord.Embed(description=f"❌ Crate reward card **{value}** no longer exists. Contact an admin.", color=discord.Color.red())
+                return await interaction.response.edit_message(embed=embed, view=None)
+
+            card_id, card_name, rarity, card_value, image, anime = card
+            local_cursor.execute("INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1", (str(interaction.user.id), card_id))
+            conn.commit()
+            local_cursor.execute("SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?", (str(interaction.user.id), card_id))
+            total_qty = local_cursor.fetchone()[0]
+
+            local_cursor.execute("SELECT color FROM rarities WHERE name = ?", (rarity,))
+            color_row = local_cursor.fetchone()
+            embed_color = discord.Color(int(color_row[0].lstrip("#"), 16)) if color_row and color_row[0] else discord.Color.default()
+
+            embed = discord.Embed(
+                description=(
+                    f"📦 **{interaction.user.display_name}** opened **{crate_name}** and received **{card_name}**\n\n"
+                    f"**{card_name}**\nRarity: {rarity}\nValue: {card_value}\nAnime: {anime or 'Unknown'}\n"
+                    f"Card ID: {card_id}\nQuantity: {total_qty}"
+                ),
+                color=embed_color
+            )
+            if image:
+                embed.set_image(url=image)
+            await interaction.response.edit_message(embed=embed, view=None)
+
+
+class CrateOpenView(discord.ui.View):
+    def __init__(self, owner_id, crates):
+        super().__init__(timeout=120)
+        self.add_item(CrateSelect(owner_id, crates))
         
 
 
@@ -1113,7 +1204,22 @@ async def balance_rank(interaction: discord.Interaction):
 # --- PART 8: ADMIN MANAGEMENT COMMANDS ---
 
 # --- PART 9: FINAL FEATURES ---
+@client.tree.command(name="crate", description="Open one of your crates")
+async def crate(interaction: discord.Interaction):
+    await interaction.response.defer()
+    local_cursor = conn.cursor()
+    local_cursor.execute('''
+        SELECT c.crate_id, c.crate_name, ci.quantity FROM crate_inventory ci
+        JOIN Crate c ON ci.crate_id = c.crate_id
+        WHERE ci.user_id = ? AND ci.quantity > 0 ORDER BY c.crate_name
+    ''', (str(interaction.user.id),))
+    crates = local_cursor.fetchall()
 
+    if not crates:
+        return await interaction.followup.send(embed=discord.Embed(description="❌ You don't have any crates to open.", color=discord.Color.red()))
+
+    embed = discord.Embed(title="Open a Crate 📦", description="Select a crate from below to open it.", color=discord.Color.red())
+    await interaction.followup.send(embed=embed, view=CrateOpenView(interaction.user.id, crates))
 
 
 @client.tree.command(name="account", description="Set your account privacy")
