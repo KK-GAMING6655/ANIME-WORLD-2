@@ -9,6 +9,8 @@ import datetime
 import asyncio
 import urllib.request
 import urllib.parse
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
@@ -63,7 +65,12 @@ def init_db():
                         quantity INTEGER DEFAULT 1,
                         UNIQUE(user_id, crate_id))''')
 
-    
+    cursor.execute('''CREATE TABLE IF NOT EXISTS Level (
+                        server_id TEXT,
+                        user_id TEXT,
+                        level INTEGER DEFAULT 0,
+                        xp INTEGER DEFAULT 0,
+                        UNIQUE(server_id, user_id))''')
 
     
 
@@ -723,6 +730,78 @@ async def anime_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=row[0], value=row[0]) for row in local_cursor.fetchall()]
 
 
+#LEVELING SYSTEM
+
+FONT_PATH = "assets/font.ttf"
+
+RARITY_XP = {
+    "Common": 10, "Uncommon": 25, "Rare": 60,
+    "Epic": 150, "Legendary": 400, "Super Legendary": 1000
+}
+
+def xp_required_for_level(level, base=100, exp=1.6):
+    return 0 if level <= 0 else round(base * (level ** exp))
+
+def _load_font(size):
+    try:
+        return ImageFont.truetype(FONT_PATH, size)
+    except Exception:
+        return ImageFont.load_default()
+
+def _circle_avatar(avatar_bytes, size):
+    avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((size, size))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+    avatar.putalpha(mask)
+    return avatar
+
+def generate_levelup_image(avatar_bytes, level, xp, balance):
+    W, H = 800, 300
+    canvas = Image.new("RGB", (W, H), (30, 30, 40))
+    draw = ImageDraw.Draw(canvas)
+    avatar = _circle_avatar(avatar_bytes, 180)
+    canvas.paste(avatar, (40, (H - 180)//2), avatar)
+
+    title_font, label_font = _load_font(48), _load_font(28)
+    tw = draw.textlength("LEVEL UP", font=title_font)
+    draw.text(((W - tw)/2, 30), "LEVEL UP", font=title_font, fill=(255, 215, 0))
+
+    x = 260
+    draw.text((x, 120), f"Level: {level}", font=label_font, fill=(255, 255, 255))
+    draw.text((x, 165), f"Xp: {xp}", font=label_font, fill=(255, 255, 255))
+    draw.text((x, 210), f"Balance: {balance} 🪙", font=label_font, fill=(255, 255, 255))
+
+    buf = io.BytesIO(); canvas.save(buf, format="PNG"); buf.seek(0)
+    return buf
+
+def generate_level_image(avatar_bytes, level, current_xp, next_level_xp):
+    W, H = 800, 300
+    canvas = Image.new("RGB", (W, H), (30, 30, 40))
+    draw = ImageDraw.Draw(canvas)
+    avatar = _circle_avatar(avatar_bytes, 180)
+    canvas.paste(avatar, (40, (H - 180)//2), avatar)
+
+    title_font, level_font, small_font = _load_font(40), _load_font(34), _load_font(22)
+    tw = draw.textlength("LEVEL", font=title_font)
+    draw.text(((W - tw)/2, 25), "LEVEL", font=title_font, fill=(255, 215, 0))
+    lvl_text = f"Level {level}"
+    lw = draw.textlength(lvl_text, font=level_font)
+    draw.text(((W - lw)/2, 80), lvl_text, font=level_font, fill=(255, 255, 255))
+
+    bar_x, bar_y, bar_w, bar_h = 260, 180, 470, 30
+    progress = 0 if next_level_xp == 0 else min(1.0, current_xp / next_level_xp)
+    draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), radius=15, fill=(60, 60, 70))
+    draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w * progress, bar_y + bar_h), radius=15, fill=(88, 220, 120))
+
+    draw.text((bar_x, bar_y + bar_h + 8), str(current_xp), font=small_font, fill=(255, 255, 255))
+    nt = str(next_level_xp)
+    nw = draw.textlength(nt, font=small_font)
+    draw.text((bar_x + bar_w - nw, bar_y + bar_h + 8), nt, font=small_font, fill=(255, 255, 255))
+
+    buf = io.BytesIO(); canvas.save(buf, format="PNG"); buf.seek(0)
+    return buf
+
+
 
 # --- 6. COMMANDS ---
 
@@ -851,14 +930,15 @@ async def gacha(interaction: discord.Interaction):
     cursor.execute('SELECT color FROM rarities WHERE name = ?', (card[2],))
     color_res = cursor.fetchone()
     embed_color = int(color_res[0].replace("#", ""), 16) if color_res else 0xFFFF00
-
+    
     embed = discord.Embed(title="✨ GACHA PULL ✨", color=embed_color)
     embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`", inline=False)
     embed.set_image(url=card[4])
     embed.set_footer(text=f"Remaining Balance: {balance - cost} 🪙")
     
     await interaction.followup.send(content=f"🎉 {interaction.user.mention} pulled a card!", embed=embed)
-    
+    await award_xp(interaction.guild.id, interaction.user, [chosen_rarity], interaction.channel)
+
 
 # --- 6. COMMANDS (REPLACEMENTS) ---
 
@@ -1435,6 +1515,20 @@ async def cointoss(interaction: discord.Interaction, amount: int, call: app_comm
 
     await interaction.followup.send(embed=embed)
 
+@client.tree.command(name="level", description="View your level")
+async def level(interaction: discord.Interaction, user: discord.Member = None):
+    await interaction.response.defer()
+    target = user or interaction.user
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (str(interaction.guild.id), str(target.id)))
+    row = local_cursor.fetchone()
+    lvl, xp = row if row else (0, 0)
+    next_xp = xp_required_for_level(lvl + 1)
+    avatar_bytes = await target.display_avatar.read()
+    img = await asyncio.to_thread(generate_level_image, avatar_bytes, lvl, xp, next_xp)
+    await interaction.followup.send(file=discord.File(fp=img, filename="level.png"))
+
+
 
 @client.tree.command(name="help", description="List all available commands and how to play")
 async def help(interaction: discord.Interaction):
@@ -1531,6 +1625,8 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
         # 6. Send Response
         view = BulkGachaView(interaction.user, pull_results, len(pull_results))
         await interaction.followup.send(f"🎉 {interaction.user.mention} pulled cards!", embed=view.create_embed(), view=view)
+        all_rarities = [r['rarity'] for r in pull_results]
+        await award_xp(interaction.guild.id, interaction.user, all_rarities, interaction.channel)
 
     except Exception as e:
         conn.rollback()
