@@ -841,15 +841,6 @@ async def award_xp(guild_id, member: discord.Member, rarities: list, channel: di
 
 # --- 6. COMMANDS ---
 
-@client.tree.command(name="card_leaderboard", description="View cards ranked by value")
-async def card_leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer()
-    cursor.execute('SELECT * FROM cards ORDER BY value DESC')
-    cards = cursor.fetchall()
-    if not cards: return await interaction.followup.send("No cards found.")
-    view = CardPaginator(cards, 0, "Global Card Ranking")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
-
 @client.tree.command(name="user_leaderboard", description="Top 10 Collectors")
 async def user_leaderboard(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -1495,50 +1486,26 @@ async def account(interaction: discord.Interaction, status: app_commands.Choice[
     conn.commit()
     await interaction.response.send_message(f"✅ Your account is now **{status.name}**.", ephemeral=True)
 
-@client.tree.command(name="balance", description="Check your coin balance")
-async def balance(interaction: discord.Interaction):
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
+
+@client.tree.command(name="balance", description="Check your (or another user's) coin balance")
+async def balance(interaction: discord.Interaction, user: discord.Member = None):
+    target = user or interaction.user
+
+    if target.id != interaction.user.id:
+        cursor.execute('SELECT account_status FROM users WHERE id = ?', (str(target.id),))
+        row = cursor.fetchone()
+        status = row[0] if row else "public"
+        if status == "private":
+            embed = discord.Embed(description=f"❌ {target.mention}'s profile is private. You can't check the balance.", color=discord.Color.red())
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(target.id),))
     row = cursor.fetchone()
     bal = row[0] if row else 0
-    embed = discord.Embed(title=f"{interaction.user.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
+    embed = discord.Embed(title=f"{target.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
     await interaction.response.send_message(embed=embed)
 
-@client.tree.command(name="user_balance", description="Check another member's balance")
-async def user_balance(interaction: discord.Interaction, user: discord.Member):
-    cursor.execute('SELECT balance, account_status FROM users WHERE id = ?', (str(user.id),))
-    row = cursor.fetchone()
-    if row and row[1] == 'private' and interaction.user.id != user.id:
-        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
-        return await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    bal = row[0] if row else 0
-    embed = discord.Embed(title=f"{user.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
-    await interaction.response.send_message(embed=embed)
 
-@client.tree.command(name="user_inventory", description="Check another member's inventory")
-async def user_inventory(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer() # <--- Added this to fix the timeout
-    
-    cursor.execute('SELECT account_status FROM users WHERE id = ?', (str(user.id),))
-    row = cursor.fetchone()
-    
-    # Check privacy
-    if row and row[0] == 'private' and interaction.user.id != user.id:
-        embed = discord.Embed(description=f"❌ {user.mention}'s account is private.\nYou can't get details of that account.", color=discord.Color.red())
-        return await interaction.followup.send(embed=embed)
-    
-    cursor.execute('''SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity 
-                      FROM inventory i 
-                      JOIN cards c ON i.card_id = c.card_id 
-                      WHERE i.user_id = ?''', (str(user.id),))
-    cards = cursor.fetchall()
-    
-    if not cards:
-        return await interaction.followup.send(f"{user.name} does not have any cards yet!")
-    
-    view = CardPaginator(cards, 0, f"{user.name}'s Inventory")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
-    
 
 @client.tree.command(name="login", description="Get your Web Portal ID and Password")
 async def login(interaction: discord.Interaction):
