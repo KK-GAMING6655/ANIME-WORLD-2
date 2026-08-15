@@ -866,12 +866,13 @@ def generate_leaderboard_image(title, header_label, rows):
     header_y = 68
     draw.text((25, header_y), "No", font=header_font, fill=(200, 200, 200))
     draw.text((col_no_w + 20, header_y), "Name", font=header_font, fill=(200, 200, 200))
-    draw.text((col_no_w + col_name_w + 20, header_y), header_label, font=header_font, fill=(200, 200, 200))
+    hw = draw.textlength(header_label, font=header_font)
+    draw.text((col_no_w + col_name_w + col_value_w - hw - 20, header_y), header_label, font=header_font, fill=(200, 200, 200))
 
     draw.line((0, header_h, W, header_h), fill=(90, 90, 100), width=2)
-    draw.line((col_no_w, 0, col_no_w, H), fill=(90, 90, 100), width=2)
-    draw.line((col_no_w + col_name_w, 0, col_no_w + col_name_w, H), fill=(90, 90, 100), width=2)
-
+    draw.line((col_no_w, header_h, col_no_w, H), fill=(90, 90, 100), width=2)
+    draw.line((col_no_w + col_name_w, header_h, col_no_w + col_name_w, H), fill=(90, 90, 100), width=2)
+    
     y = header_h
     avatar_size = 40
     for rank, name, avatar_bytes, value_str in rows:
