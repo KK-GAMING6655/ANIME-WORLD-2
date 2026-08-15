@@ -878,15 +878,85 @@ async def rank(interaction: discord.Interaction):
 
 # (All other previously defined commands like /balance, /add_card, /inventory etc. should remain below)
 
-@client.tree.command(name="inventory", description="View your collection")
-async def inventory(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    cursor.execute('SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?', (str(interaction.user.id),))
-    items = cursor.fetchall()
-    if not items: return await interaction.followup.send("Inventory empty.")
-    view = CardPaginator(items, 0, "Your Collection")
-    await interaction.followup.send(embed=view.create_embed(), view=view)
+@client.tree.command(name="inventory", description="View a collection with sorting and filters")
+@app_commands.describe(
+    sort="How to sort the list",
+    user="Whose inventory to view (default: yourself)",
+    rarity="Filter by rarity",
+    anime="Filter by anime",
+    minimum_value="Only show cards worth at least this much",
+    maximum_value="Only show cards worth at most this much"
+)
+@app_commands.choices(sort=[
+    app_commands.Choice(name="Low to High Value", value="value_asc"),
+    app_commands.Choice(name="High to Low Value", value="value_desc"),
+    app_commands.Choice(name="Low to High ID", value="id_asc"),
+    app_commands.Choice(name="High to Low ID", value="id_desc"),
+])
+@app_commands.autocomplete(rarity=rarity_autocomplete, anime=anime_autocomplete)
+async def inventory(
+    interaction: discord.Interaction,
+    sort: app_commands.Choice[str],
+    user: discord.Member = None,
+    rarity: str = None,
+    anime: str = None,
+    minimum_value: int = None,
+    maximum_value: int = None
+):
+    await interaction.response.defer()
+    target = user or interaction.user
+    local_cursor = conn.cursor()
 
+    if target.id != interaction.user.id:
+        local_cursor.execute("SELECT account_status FROM users WHERE id = ?", (str(target.id),))
+        row = local_cursor.fetchone()
+        status = row[0] if row else "public"
+        if status == "private":
+            embed = discord.Embed(description=f"❌ {target.mention}'s profile is private. You can't check the inventory.", color=discord.Color.red())
+            return await interaction.followup.send(embed=embed, ephemeral=True)
+
+    if rarity is not None:
+        local_cursor.execute("SELECT 1 FROM rarities WHERE name = ?", (rarity,))
+        if not local_cursor.fetchone():
+            return await interaction.followup.send(embed=discord.Embed(description=f"❌ **{rarity}** is not a valid rarity.", color=discord.Color.red()))
+
+    if anime is not None:
+        local_cursor.execute("SELECT 1 FROM anime WHERE name = ?", (anime,))
+        if not local_cursor.fetchone():
+            return await interaction.followup.send(embed=discord.Embed(description=f"❌ **{anime}** is not a valid anime.", color=discord.Color.red()))
+
+    if minimum_value is not None and maximum_value is not None and minimum_value > maximum_value:
+        return await interaction.followup.send(embed=discord.Embed(description="❌ Minimum value can't be greater than maximum value.", color=discord.Color.red()))
+
+    query = '''SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i
+               JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?'''
+    params = [str(target.id)]
+    if rarity is not None:
+        query += " AND c.rarity = ?"; params.append(rarity)
+    if anime is not None:
+        query += " AND c.anime = ?"; params.append(anime)
+    if minimum_value is not None:
+        query += " AND c.value >= ?"; params.append(minimum_value)
+    if maximum_value is not None:
+        query += " AND c.value <= ?"; params.append(maximum_value)
+
+    sort_map = {
+        "value_asc": " ORDER BY c.value ASC",
+        "value_desc": " ORDER BY c.value DESC",
+        "id_asc": " ORDER BY CAST(c.card_id AS INTEGER) ASC",
+        "id_desc": " ORDER BY CAST(c.card_id AS INTEGER) DESC",
+    }
+    query += sort_map[sort.value]
+
+    local_cursor.execute(query, params)
+    items = local_cursor.fetchall()
+
+    if not items:
+        return await interaction.followup.send(embed=discord.Embed(description="⚠️ No cards match those filters.", color=discord.Color.orange()))
+
+    title = "Your Collection" if target.id == interaction.user.id else f"{target.name}'s Collection"
+    view = CardPaginator(items, 0, title)
+    await interaction.followup.send(embed=view.create_embed(), view=view)
 # --- 1. /addcoin (Admin) ---
 
 # --- 2. /view_card (Member) ---
