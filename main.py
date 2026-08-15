@@ -839,15 +839,65 @@ async def award_xp(guild_id, member: discord.Member, rarities: list, channel: di
             file=discord.File(fp=img, filename="levelup.png")
         )
 
+
+
+
+
+
+def generate_leaderboard_image(title, header_label, rows):
+    row_h = 60
+    header_h = 100
+    col_no_w = 80
+    col_name_w = 380
+    col_value_w = 260
+    W = col_no_w + col_name_w + col_value_w
+    H = header_h + row_h * len(rows)
+
+    canvas = Image.new("RGB", (W, H), (30, 30, 40))
+    draw = ImageDraw.Draw(canvas)
+
+    title_font = _load_font(36)
+    header_font = _load_font(24)
+    row_font = _load_font(22)
+
+    tw = draw.textlength(title, font=title_font)
+    draw.text(((W - tw) / 2, 20), title, font=title_font, fill=(255, 215, 0))
+
+    header_y = 68
+    draw.text((25, header_y), "No", font=header_font, fill=(200, 200, 200))
+    draw.text((col_no_w + 20, header_y), "Name", font=header_font, fill=(200, 200, 200))
+    draw.text((col_no_w + col_name_w + 20, header_y), header_label, font=header_font, fill=(200, 200, 200))
+
+    draw.line((0, header_h, W, header_h), fill=(90, 90, 100), width=2)
+    draw.line((col_no_w, 0, col_no_w, H), fill=(90, 90, 100), width=2)
+    draw.line((col_no_w + col_name_w, 0, col_no_w + col_name_w, H), fill=(90, 90, 100), width=2)
+
+    y = header_h
+    avatar_size = 40
+    for rank, name, avatar_bytes, value_str in rows:
+        draw.line((0, y, W, y), fill=(70, 70, 80), width=1)
+        draw.text((25, y + row_h // 2 - 12), str(rank), font=row_font, fill=(255, 255, 255))
+
+        ay = y + (row_h - avatar_size) // 2
+        if avatar_bytes:
+            avatar = _circle_avatar(avatar_bytes, avatar_size)
+            canvas.paste(avatar, (col_no_w + 15, ay), avatar)
+        else:
+            draw.ellipse((col_no_w + 15, ay, col_no_w + 15 + avatar_size, ay + avatar_size), fill=(90, 90, 100))
+
+        draw.text((col_no_w + 15 + avatar_size + 12, y + row_h // 2 - 12), name, font=row_font, fill=(255, 255, 255))
+
+        vw = draw.textlength(value_str, font=row_font)
+        draw.text((col_no_w + col_name_w + col_value_w - vw - 20, y + row_h // 2 - 12), value_str, font=row_font, fill=(255, 255, 255))
+        y += row_h
+
+    draw.line((0, H - 1, W, H - 1), fill=(90, 90, 100), width=2)
+    buf = io.BytesIO(); canvas.save(buf, format="PNG"); buf.seek(0)
+    return buf
+
+
 # --- 6. COMMANDS ---
 
-@client.tree.command(name="user_leaderboard", description="Top 10 Collectors")
-async def user_leaderboard(interaction: discord.Interaction):
-    await interaction.response.defer()
-    data = get_all_leaderboard_data()[:10] # Top 10 only
-    if not data: return await interaction.followup.send("No collectors yet.")
-    view = UserLeaderboardPaginator(data, 0, client)
-    await interaction.followup.send(embed=await view.create_embed(), view=view)
 
 @client.tree.command(name="rank", description="Check your personal rank and points")
 async def rank(interaction: discord.Interaction):
@@ -1427,30 +1477,6 @@ async def gift_coin(interaction: discord.Interaction, user: discord.Member, amou
     except discord.Forbidden:
         await interaction.followup.send(f"✅ Successfully gifted to {user.name}, but their DMs are closed so I couldn't notify them.")
 
-@client.tree.command(name="balance_rank", description="View the top 10 users with the highest balance")
-async def balance_rank(interaction: discord.Interaction):
-    await interaction.response.defer() # No ephemeral=True here, so everyone can see it!
-
-    cursor.execute('SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10')
-    top_users = cursor.fetchall()
-
-    if not top_users:
-        return await interaction.followup.send(embed=discord.Embed(description="No users have coins yet!", color=0xFFFF00))
-
-    desc = ""
-    for i, (user_id, balance) in enumerate(top_users, 1):
-        try:
-            # Force discord to fetch the username even if they are offline
-            user_obj = interaction.client.get_user(int(user_id)) or await interaction.client.fetch_user(int(user_id))
-            name = user_obj.name
-        except:
-            name = "Unknown User"
-        
-        desc += f"**{i})** {name} - {balance} 🪙\n"
-
-    embed = discord.Embed(title="🏆 Wealth Leaderboard", description=desc, color=0xFFFF00) # Yellow color
-    await interaction.followup.send(embed=embed)
-        
 
 # --- PART 7: ADMIN UTILITIES ---
 
@@ -1678,6 +1704,48 @@ async def level(interaction: discord.Interaction, user: discord.Member = None):
     img = await asyncio.to_thread(generate_level_image, avatar_bytes, lvl, xp, next_xp)
     await interaction.followup.send(file=discord.File(fp=img, filename="level.png"))
 
+
+
+@client.tree.command(name="leaderboard", description="View a top 10 leaderboard")
+@app_commands.choices(type=[
+    app_commands.Choice(name="Balance", value="balance"),
+    app_commands.Choice(name="Card", value="card"),
+    app_commands.Choice(name="Level", value="level"),
+])
+async def leaderboard(interaction: discord.Interaction, type: app_commands.Choice[str]):
+    await interaction.response.defer()
+    local_cursor = conn.cursor()
+    rows_data = []
+
+    if type.value == "balance":
+        local_cursor.execute('SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10')
+        source = [(uid, f"{bal} 🪙") for uid, bal in local_cursor.fetchall()]
+        title, header_label = "Balance Leaderboard", "Balance"
+
+    elif type.value == "card":
+        data = get_all_leaderboard_data()[:10]
+        source = [(entry["id"], str(entry["points"])) for entry in data]
+        title, header_label = "Card Leaderboard", "Points"
+
+    else:
+        local_cursor.execute('SELECT user_id, level FROM Level WHERE server_id = ? ORDER BY level DESC, xp DESC LIMIT 10', (str(interaction.guild.id),))
+        source = [(uid, str(lvl)) for uid, lvl in local_cursor.fetchall()]
+        title, header_label = "Level Leaderboard", "Level"
+
+    if not source:
+        return await interaction.followup.send(embed=discord.Embed(description="No data yet for this leaderboard.", color=discord.Color.orange()))
+
+    for i, (uid, value_str) in enumerate(source, 1):
+        try:
+            user_obj = client.get_user(int(uid)) or await client.fetch_user(int(uid))
+            name = user_obj.name
+            avatar_bytes = await user_obj.display_avatar.read()
+        except Exception:
+            name, avatar_bytes = "Unknown User", None
+        rows_data.append((i, name, avatar_bytes, value_str))
+
+    img = await asyncio.to_thread(generate_leaderboard_image, title, header_label, rows_data)
+    await interaction.followup.send(file=discord.File(fp=img, filename="leaderboard.png"))
 
 
 @client.tree.command(name="help", description="List all available commands and how to play")
