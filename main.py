@@ -1124,6 +1124,83 @@ async def burn(interaction: discord.Interaction, card_name: str, quantity: int =
         await interaction.response.send_message(f"An error occurred: {e}", ephemeral=True)
     
 
+
+@client.tree.command(name="bulk_burn", description="Burn multiple cards at once")
+@app_commands.choices(filter=[
+    app_commands.Choice(name="Burn all cards", value="all"),
+    app_commands.Choice(name="Burn all duplicate cards", value="duplicates"),
+])
+@app_commands.autocomplete(rarity=rarity_autocomplete, anime=anime_autocomplete)
+async def bulk_burn(interaction: discord.Interaction, filter: app_commands.Choice[str], rarity: str = None, anime: str = None):
+    await interaction.response.defer()
+    local_cursor = conn.cursor()
+
+    if rarity is not None:
+        local_cursor.execute("SELECT 1 FROM rarities WHERE name = ?", (rarity,))
+        if not local_cursor.fetchone():
+            return await interaction.followup.send(embed=discord.Embed(description=f"❌ **{rarity}** is not a valid rarity.", color=discord.Color.red()))
+
+    if anime is not None:
+        local_cursor.execute("SELECT 1 FROM anime WHERE name = ?", (anime,))
+        if not local_cursor.fetchone():
+            return await interaction.followup.send(embed=discord.Embed(description=f"❌ **{anime}** is not a valid anime.", color=discord.Color.red()))
+
+    query = '''SELECT c.card_id, c.rarity, c.value, i.quantity FROM inventory i
+               JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?'''
+    params = [str(interaction.user.id)]
+    if rarity is not None:
+        query += " AND c.rarity = ?"; params.append(rarity)
+    if anime is not None:
+        query += " AND c.anime = ?"; params.append(anime)
+
+    local_cursor.execute(query, params)
+    owned = local_cursor.fetchall()
+
+    rarity_counts = {"Common": 0, "Uncommon": 0, "Rare": 0, "Epic": 0, "Legendary": 0, "Super Legendary": 0}
+    total_coins = 0
+    total_burned = 0
+
+    for card_id, card_rarity, value, quantity in owned:
+        if filter.value == "all":
+            burn_qty = quantity
+        else:
+            burn_qty = quantity - 1
+            if burn_qty <= 0:
+                continue
+
+        coins = int(value * burn_qty * 0.5)
+        total_coins += coins
+        total_burned += burn_qty
+        rarity_counts[card_rarity] = rarity_counts.get(card_rarity, 0) + burn_qty
+
+        if burn_qty == quantity:
+            local_cursor.execute("DELETE FROM inventory WHERE user_id = ? AND card_id = ?", (str(interaction.user.id), card_id))
+        else:
+            local_cursor.execute("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?", (burn_qty, str(interaction.user.id), card_id))
+
+    if total_burned == 0:
+        return await interaction.followup.send(embed=discord.Embed(description="⚠️ No cards matched those filters to burn.", color=discord.Color.orange()))
+
+    local_cursor.execute("INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?",
+                          (str(interaction.user.id), total_coins, total_coins))
+    conn.commit()
+
+    embed = discord.Embed(
+        title=f"{total_burned} Cards burned.",
+        description=(
+            f"Common: {rarity_counts['Common']} Cards\n"
+            f"Uncommon: {rarity_counts['Uncommon']} Cards\n"
+            f"Rare: {rarity_counts['Rare']} Cards\n"
+            f"Epic: {rarity_counts['Epic']} Cards\n"
+            f"Legendary: {rarity_counts['Legendary']} Cards\n"
+            f"Super Legendary: {rarity_counts['Super Legendary']} Cards\n\n"
+            f"{interaction.user.mention} received **{total_coins}** 🪙."
+        ),
+        color=discord.Color.green()
+    )
+    await interaction.followup.send(embed=embed)
+
+
 # --- MARKET SYSTEM COMMANDS ---
 @app_commands.autocomplete(card_name=owned_card_autocomplete)
 @client.tree.command(name="market_sell", description="List a card for sale on the market")
