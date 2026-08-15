@@ -803,6 +803,42 @@ def generate_level_image(avatar_bytes, level, current_xp, next_level_xp):
 
 
 
+
+async def award_xp(guild_id, member: discord.Member, rarities: list, channel: discord.abc.Messageable):
+    xp_gained = sum(RARITY_XP.get(r, 0) for r in rarities)
+    if xp_gained <= 0:
+        return
+
+    local_cursor = conn.cursor()
+    local_cursor.execute(
+        "INSERT INTO Level (server_id, user_id, level, xp) VALUES (?, ?, 0, ?) "
+        "ON CONFLICT(server_id, user_id) DO UPDATE SET xp = xp + ?",
+        (str(guild_id), str(member.id), xp_gained, xp_gained)
+    )
+    conn.commit()
+
+    local_cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (str(guild_id), str(member.id)))
+    level, total_xp = local_cursor.fetchone()
+
+    leveled_up = False
+    while total_xp >= xp_required_for_level(level + 1):
+        level += 1
+        leveled_up = True
+
+    if leveled_up:
+        local_cursor.execute("UPDATE Level SET level = ? WHERE server_id = ? AND user_id = ?", (level, str(guild_id), str(member.id)))
+        conn.commit()
+        local_cursor.execute("SELECT balance FROM users WHERE id = ?", (str(member.id),))
+        row = local_cursor.fetchone()
+        balance = row[0] if row else 0
+
+        avatar_bytes = await member.display_avatar.read()
+        img = await asyncio.to_thread(generate_levelup_image, avatar_bytes, level, total_xp, balance)
+        await channel.send(
+            content=f"{member.mention} reached level **{level}**. Congratulations. We are proud of you!!",
+            file=discord.File(fp=img, filename="levelup.png")
+        )
+
 # --- 6. COMMANDS ---
 
 @client.tree.command(name="card_leaderboard", description="View cards ranked by value")
