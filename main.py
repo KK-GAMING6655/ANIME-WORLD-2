@@ -616,7 +616,11 @@ class BulkGachaView(discord.ui.View):
         if card['image']:
             embed.set_image(url=card['image'])
         
-        embed.set_footer(text=f"Collector: {self.user.name}")
+        local_cursor = conn.cursor()
+        local_cursor.execute("SELECT balance FROM users WHERE id = ?", (str(self.user.id),))
+        row = local_cursor.fetchone()
+        bal = row[0] if row else 0
+        embed.set_footer(text=f"Balance: {bal} 🪙")
         return embed
 
     @discord.ui.button(label="⬅️", style=discord.ButtonStyle.gray)
@@ -1864,16 +1868,26 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
 
     pull_results = []
 
+    cursor.execute("SELECT card_id, name, rarity, value, image FROM cards")
+    all_cards = cursor.fetchall()
+    cards_by_rarity = {}
+    for c in all_cards:
+        cards_by_rarity.setdefault(c[2], []).append(c)
+
+    pick_counts = {}
+    DUPLICATE_DECAY = 0.35
+
     try:
         for _ in range(no_of_pulls):
             rarity = random.choices(rarity_names, weights=rarity_chances, k=1)[0]
-            cursor.execute('SELECT card_id, name, value, image FROM cards WHERE rarity = ?', (rarity,))
-            cards_of_rarity = cursor.fetchall()
-            
+            cards_of_rarity = cards_by_rarity.get(rarity, [])
+
             if not cards_of_rarity: continue
-                
-            card = random.choice(cards_of_rarity)
-            c_id, c_name, c_value, c_image = card
+
+            weights = [DUPLICATE_DECAY ** pick_counts.get(c[0], 0) for c in cards_of_rarity]
+            card = random.choices(cards_of_rarity, weights=weights, k=1)[0]
+            c_id, c_name, c_rarity, c_value, c_image = card
+            pick_counts[c_id] = pick_counts.get(c_id, 0) + 1
 
             cursor.execute('SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?', (user_id, c_id))
             inv_item = cursor.fetchone()
@@ -1882,13 +1896,14 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
                 cursor.execute('UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND card_id = ?', (user_id, c_id))
             else:
                 cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)', (user_id, c_id))
-                # The 'owners' update line is removed here to prevent the SQLite error
 
             pull_results.append({
                 'card_id': c_id, 'name': c_name, 'rarity': rarity,
                 'value': c_value, 'image': c_image, 'color': rarity_colors[rarity]
             })
-
+            
+            
+        pull_results.sort(key=lambda r: RARITY_ORDER.get(r['rarity'], 99))
         # 5. Deduct Balance and Commit
         cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (gacha_cost, user_id))
         conn.commit()
