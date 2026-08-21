@@ -2625,7 +2625,7 @@ async def px_leaderboard(message, args):
 
 # --- 24. help ---
 async def px_help(message, args):
-    view = HelpPaginator(HELP_PAGES)
+    view = HelpPaginator(pages)
     await message.channel.send(embed=view.create_embed(), view=view)
 
 
