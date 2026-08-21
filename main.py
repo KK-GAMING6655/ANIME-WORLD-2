@@ -682,6 +682,7 @@ async def on_message(message):
     local_cursor = conn.cursor()
     local_cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(message.author.id), c, c))
     conn.commit()
+    await route_prefix_command(message)
 
 
 
@@ -1808,21 +1809,34 @@ async def leaderboard(interaction: discord.Interaction, type: app_commands.Choic
 @client.tree.command(name="help", description="List all available commands and how to play")
 async def help(interaction: discord.Interaction):
     pages = [
-        # Page 1: Welcome Page
-        "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the #**Anime TCG** channel. You can earn coins by chatting with others and by using member commands. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
+    # Page 1: Welcome Page
+    "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the #**Anime TCG** channel. You can earn coins by chatting with others and by using member commands. You can use either `/` slash commands or `Atcg` prefix commands — both do the same thing. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
 
-        # Page 2: Economy & Basics
-        "**💰 Economy & Basics**\n\n**1. `/balance [user]`**\nCheck your (or another user's) coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your collection points and rank.\n\n**6. `/burn`**\nGet 50% of card value by burning card.\n\n**7. `/bulk_burn`**\nBurn multiple cards at once by filter.\n\n**8. `/cointoss`**\nBet your coins on a coin flip.",
+    # Page 2: Economy & Basics
+    "**💰 Economy & Basics**\n\n**1. `/balance [user]`**\nCheck your (or another user's) coin balance.\n\n**2. `/beg`**\nAsk for coins (30m cooldown).\n\n**3. `/daily`**\nClaim daily coins (resets at midnight).\n\n**4. `/account`**\nSet your profile to Public or Private.\n\n**5. `/rank`**\nCheck your collection points and rank.\n\n**6. `/burn`**\nGet 50% of card value by burning card.\n\n**7. `/bulk_burn`**\nBurn multiple cards at once by filter.\n\n**8. `/cointoss`**\nBet your coins on a coin flip.",
 
-        # Page 3: Gacha & Collecting
-        "**🎴 Gacha & Collecting**\n\n**9. `/gacha`**\nSpend coins to pull a random card.\n\n**10. `/bulk_gacha`**\nPull multiple cards at once.\n\n**11. `/inventory [user]`**\nView a collection with sorting and filters.\n\n**12. `/card_list`**\nBrowse all cards with sorting and filters.\n\n**13. `/view_card`**\nInspect a specific card's details and image.\n\n**14. `/rarity_list`**\nView all card rarities and drop chances.\n\n**15. `/crate`**\nOpen one of your crates.\n\n**16. `/level`**\nCheck your level and XP progress.",
+    # Page 3: Gacha & Collecting
+    "**🎴 Gacha & Collecting**\n\n**9. `/gacha`**\nSpend coins to pull a random card.\n\n**10. `/bulk_gacha`**\nPull multiple cards at once.\n\n**11. `/inventory [user]`**\nView a collection with sorting and filters.\n\n**12. `/card_list`**\nBrowse all cards with sorting and filters.\n\n**13. `/view_card`**\nInspect a specific card's details and image.\n\n**14. `/rarity_list`**\nView all card rarities and drop chances.\n\n**15. `/crate`**\nOpen one of your crates.\n\n**16. `/level`**\nCheck your level and XP progress.",
 
-        # Page 4: Social & Trading
-        "**🤝 Social & Trading**\n\n**17. `/gift_card`**\nGive a card to another player.\n\n**18. `/gift_coin`**\nGive coins to another player.\n\n**19. `/trade`**\nTrade cards with another player.",
+    # Page 4: Social & Trading
+    "**🤝 Social & Trading**\n\n**17. `/gift_card`**\nGive a card to another player.\n\n**18. `/gift_coin`**\nGive coins to another player.\n\n**19. `/trade`**\nTrade cards with another player.",
 
-        # Page 5: Market & Leaderboards
-        "**⚖️ Market & Leaderboards**\n\n**20. `/market`**\nBrowse cards for sale.\n\n**21. `/market_sell`**\nPut a card up for sale.\n\n**22. `/remove_market`**\nCancel your market listing.\n\n**23. `/leaderboard`**\nView the Balance, Card, or Level leaderboard."
-    ]
+    # Page 5: Market & Leaderboards
+    "**⚖️ Market & Leaderboards**\n\n**20. `/market`**\nBrowse cards for sale.\n\n**21. `/market_sell`**\nPut a card up for sale.\n\n**22. `/remove_market`**\nCancel your market listing.\n\n**23. `/leaderboard`**\nView the Balance, Card, or Level leaderboard.",
+
+    # Page 6: Prefix Commands — Economy & Basics
+    "**💰 Prefix — Economy & Basics**\nUse `Atcg` instead of `/`.\n\n`Atcg balance [@user]`\n`Atcg beg`\n`Atcg daily`\n`Atcg account <public/private>`\n`Atcg rank`\n`Atcg burn <card> [qty]`\n`Atcg bulk burn`\n`Atcg cointoss <amount> <head/tail>` (alias: `ct`)",
+
+    # Page 7: Prefix Commands — Gacha & Collecting
+    "**🎴 Prefix — Gacha & Collecting**\n\n`Atcg gacha [no_of_pulls]` — leave blank for a single pull, add a number (max 20) to bulk pull\n`Atcg inventory [rarity] [anime] [@user]`\n`Atcg card list [rarity] [anime]` (aliases: `cardlist`, `cl`)\n`Atcg view card <name/id>` (aliases: `viewcard`, `vc`, `card view`)\n`Atcg rarity list`\n`Atcg crate`\n`Atcg level [@user]`",
+
+    # Page 8: Prefix Commands — Social & Trading
+    "**🤝 Prefix — Social & Trading**\n\n`Atcg gift card <@user> <card> [qty]` (aliases: `gcard`, `card gift`)\n`Atcg gift coin <@user> <amount>` (aliases: `gcoin`, `coin gift`)\n`Atcg trade <@user> <card> <amount> <qty>`",
+
+    # Page 9: Prefix Commands — Market & Leaderboards
+    "**⚖️ Prefix — Market & Leaderboards**\n\n`Atcg market`\n`Atcg market sell <card> <price> [qty]` (aliases: `ms`, `sell`)\n`Atcg remove market <id>` (aliases: `rm`, `remove`, `market remove`)\n`Atcg leaderboard [balance/card/level]` (alias: `lb`)\n`Atcg help`"
+]
+
     
     view = HelpPaginator(pages)
     # ephemeral=True ensures only the sender can see this yellow embed
@@ -1918,7 +1932,832 @@ async def bulk_gacha(interaction: discord.Interaction, no_of_pulls: int):
         conn.rollback()
         # Since we deferred, we must use followup.send
         await interaction.followup.send(f"An error occurred during bulk gacha: {e}")
-        
+
+
+
+#Prefix commands
+# ============================================================
+# PREFIX COMMAND SYSTEM ("Atcg ...")
+# ============================================================
+import difflib
+
+PREFIX = "atcg"
+
+def resolve_card_fuzzy(query):
+    """Exact match by name or ID first; falls back to the closest-matching name."""
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT card_id, name, rarity, value, image, anime FROM cards WHERE name = ? OR card_id = ?", (query, query))
+    card = local_cursor.fetchone()
+    if card:
+        return card
+    local_cursor.execute("SELECT card_id, name, rarity, value, image, anime FROM cards")
+    all_cards = local_cursor.fetchall()
+    names = [c[1] for c in all_cards]
+    matches = difflib.get_close_matches(query, names, n=1, cutoff=0.4)
+    if matches:
+        for c in all_cards:
+            if c[1] == matches[0]:
+                return c
+    return None
+
+def extract_rarity_anime(text):
+    """Scans free text for a known rarity and/or anime name, case-insensitive, longest name first."""
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT name FROM rarities")
+    rarities = [r[0] for r in local_cursor.fetchall()]
+    local_cursor.execute("SELECT name FROM anime")
+    animes = [r[0] for r in local_cursor.fetchall()]
+
+    lower_text = text.lower()
+    found_rarity = next((r for r in sorted(rarities, key=len, reverse=True) if r.lower() in lower_text), None)
+    found_anime = next((a for a in sorted(animes, key=len, reverse=True) if a.lower() in lower_text), None)
+    return found_rarity, found_anime
+
+def strip_mentions(args):
+    return [a for a in args if not (a.startswith("<@") and a.endswith(">"))]
+
+
+class PrefixSortSelect(ui.Select):
+    """Reusable sort dropdown attached to a CardPaginator view for prefix commands."""
+    def __init__(self, owner_id, base_query, base_params, sort_templates):
+        options = [
+            discord.SelectOption(label="Low to High Value", value="value_asc", default=True),
+            discord.SelectOption(label="High to Low Value", value="value_desc"),
+            discord.SelectOption(label="Low to High ID", value="id_asc"),
+            discord.SelectOption(label="High to Low ID", value="id_desc"),
+        ]
+        super().__init__(placeholder="Sort", options=options)
+        self.owner_id = owner_id
+        self.base_query = base_query
+        self.base_params = base_params
+        self.sort_templates = sort_templates
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+
+        local_cursor = conn.cursor()
+        local_cursor.execute(self.base_query + self.sort_templates[self.values[0]], self.base_params)
+        results = local_cursor.fetchall()
+
+        for opt in self.options:
+            opt.default = (opt.value == self.values[0])
+
+        view = self.view
+        view.cards = results
+        view.current_page = 0
+        await interaction.response.edit_message(embed=view.create_embed(), view=view)
+
+
+# --- 1. rank ---
+async def px_rank(message, args):
+    data = get_all_leaderboard_data()
+    user_rank = next((i for i, item in enumerate(data) if item["id"] == str(message.author.id)), None)
+    if user_rank is None:
+        return await message.channel.send("You don't have any cards yet!")
+    user_data = data[user_rank]
+    s = user_data['stats']
+    embed = discord.Embed(title=f"**{message.author.name}**", color=0xFFFF00)
+    embed.add_field(name="Stats", value=(
+        f"Common: {s['Common']}\nUncommon: {s['Uncommon']}\nRare: {s['Rare']}\n"
+        f"Epic: {s['Epic']}\nLegendary: {s['Legendary']}\nSuper Legendary: {s['Super Legendary']}\n"
+        f"**Collection Points: {user_data['points']}**\n**Rank: #{user_rank + 1}**"
+    ), inline=False)
+    await message.channel.send(embed=embed)
+
+# --- 2. inventory ---
+async def px_inventory(message, args):
+    mentions = message.mentions
+    target = mentions[0] if mentions else message.author
+    text = " ".join(strip_mentions(args))
+    rarity, anime = extract_rarity_anime(text)
+
+    local_cursor = conn.cursor()
+    if target.id != message.author.id:
+        local_cursor.execute("SELECT account_status FROM users WHERE id = ?", (str(target.id),))
+        row = local_cursor.fetchone()
+        status = row[0] if row else "public"
+        if status == "private":
+            embed = discord.Embed(description=f"❌ {target.mention}'s profile is private. You can't check the inventory.", color=discord.Color.red())
+            return await message.channel.send(embed=embed)
+
+    base_query = '''SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i
+                     JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?'''
+    params = [str(target.id)]
+    if rarity:
+        base_query += " AND c.rarity = ?"; params.append(rarity)
+    if anime:
+        base_query += " AND c.anime = ?"; params.append(anime)
+
+    sort_templates = {
+        "value_asc": " ORDER BY c.value ASC",
+        "value_desc": " ORDER BY c.value DESC",
+        "id_asc": " ORDER BY CAST(c.card_id AS INTEGER) ASC",
+        "id_desc": " ORDER BY CAST(c.card_id AS INTEGER) DESC",
+    }
+    local_cursor.execute(base_query + sort_templates["value_asc"], params)
+    items = local_cursor.fetchall()
+
+    if not items:
+        return await message.channel.send(embed=discord.Embed(description="⚠️ No cards match those filters.", color=discord.Color.orange()))
+
+    title = "Your Collection" if target.id == message.author.id else f"{target.name}'s Collection"
+    view = CardPaginator(items, 0, title)
+    view.add_item(PrefixSortSelect(message.author.id, base_query, params, sort_templates))
+    await message.channel.send(embed=view.create_embed(), view=view)
+
+# --- 3. view_card ---
+async def px_view_card(message, args):
+    if not args:
+        return await message.channel.send("❌ Usage: `Atcg view card <name/id>`")
+    query = " ".join(args)
+    card = resolve_card_fuzzy(query)
+    if not card:
+        return await message.channel.send("❌ Card not found.")
+    view = CardPaginator([card[:5]], 0, "Card Details")
+    await message.channel.send(embed=view.create_embed())
+
+# --- 4. rarity_list ---
+async def px_rarity_list(message, args):
+    cursor.execute('SELECT name, chance FROM rarities ORDER BY chance DESC')
+    rows = cursor.fetchall()
+    desc = "\n".join([f"✨ **{r[0]}**: {r[1]}%" for r in rows])
+    embed = discord.Embed(title="Rarity Tiers & Drop Chances", description=desc, color=0xFFD700)
+    await message.channel.send(embed=embed)
+
+# --- 5 & 6. gacha / bulk_gacha merged: "Atcg gacha [no_of_pulls]" ---
+async def px_gacha(message, args):
+    if args and args[0].isdigit():
+        await px_bulk_gacha_inner(message, int(args[0]))
+    else:
+        await px_gacha_inner(message)
+
+async def px_gacha_inner(message):
+    cursor.execute("SELECT value FROM config WHERE key = 'gacha_cost'")
+    res = cursor.fetchone()
+    cost = int(res[0]) if res else 1000
+
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(message.author.id),))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+
+    if balance < cost:
+        embed = discord.Embed(description=f"❌ You need **{cost}** 🪙 to pull!\n**Your balance:** {balance} 🪙", color=discord.Color.red())
+        return await message.channel.send(embed=embed)
+
+    cursor.execute('SELECT name, chance FROM rarities')
+    rarity_data = cursor.fetchall()
+    rarities = [r[0] for r in rarity_data]
+    weights = [r[1] for r in rarity_data]
+    chosen_rarity = random.choices(rarities, weights=weights, k=1)[0]
+
+    cursor.execute('SELECT * FROM cards WHERE rarity = ? ORDER BY RANDOM() LIMIT 1', (chosen_rarity,))
+    card = cursor.fetchone()
+    if not card:
+        return await message.channel.send(f"⚠️ No cards found for rarity: **{chosen_rarity}**.")
+
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (cost, str(message.author.id)))
+    cursor.execute('''INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)
+                      ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1''', (str(message.author.id), card[0]))
+    conn.commit()
+
+    cursor.execute('SELECT color FROM rarities WHERE name = ?', (card[2],))
+    color_res = cursor.fetchone()
+    embed_color = int(color_res[0].replace("#", ""), 16) if color_res else 0xFFFF00
+
+    embed = discord.Embed(title="✨ GACHA PULL ✨", color=embed_color)
+    embed.add_field(name=f"**{card[1]}**", value=f"**Rarity:** {card[2]}\n**Value:** {card[3]} 🪙\n**Card ID:** `{card[0]}`", inline=False)
+    embed.set_image(url=card[4])
+    embed.set_footer(text=f"Remaining Balance: {balance - cost} 🪙")
+
+    await message.channel.send(content=f"🎉 {message.author.mention} pulled a card!", embed=embed)
+    await award_xp(message.guild.id, message.author, [chosen_rarity], message.channel)
+
+async def px_bulk_gacha_inner(message, no_of_pulls):
+    if no_of_pulls > 20:
+        return await message.channel.send(embed=discord.Embed(description="❌ You can't pull more than 20 cards at once.", color=discord.Color.red()))
+    if no_of_pulls <= 0:
+        return await message.channel.send("Please enter a number greater than 0.")
+
+    user_id = str(message.author.id)
+    gacha_cost = 1000 * no_of_pulls
+
+    cursor.execute("SELECT balance FROM users WHERE id = ?", (user_id,))
+    user_data = cursor.fetchone()
+    balance = user_data[0] if user_data else 0
+
+    if balance < gacha_cost:
+        embed = discord.Embed(title="Insufficient Balance", color=discord.Color.red())
+        embed.description = f"Your balance is not enough.\n**Balance:** {balance} 🪙\n**Required:** {gacha_cost} 🪙"
+        return await message.channel.send(embed=embed)
+
+    cursor.execute('SELECT name, chance, color FROM rarities')
+    rarity_data = cursor.fetchall()
+    rarity_names = [r[0] for r in rarity_data]
+    rarity_chances = [r[1] for r in rarity_data]
+    rarity_colors = {r[0]: r[2] for r in rarity_data}
+
+    pull_results = []
+    cursor.execute("SELECT card_id, name, rarity, value, image FROM cards")
+    all_cards = cursor.fetchall()
+    cards_by_rarity = {}
+    for c in all_cards:
+        cards_by_rarity.setdefault(c[2], []).append(c)
+
+    pick_counts = {}
+    DUPLICATE_DECAY = 0.35
+
+    try:
+        for _ in range(no_of_pulls):
+            rarity = random.choices(rarity_names, weights=rarity_chances, k=1)[0]
+            cards_of_rarity = cards_by_rarity.get(rarity, [])
+            if not cards_of_rarity:
+                continue
+            weights = [DUPLICATE_DECAY ** pick_counts.get(c[0], 0) for c in cards_of_rarity]
+            card = random.choices(cards_of_rarity, weights=weights, k=1)[0]
+            c_id, c_name, c_rarity, c_value, c_image = card
+            pick_counts[c_id] = pick_counts.get(c_id, 0) + 1
+
+            cursor.execute('SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?', (user_id, c_id))
+            inv_item = cursor.fetchone()
+            if inv_item:
+                cursor.execute('UPDATE inventory SET quantity = quantity + 1 WHERE user_id = ? AND card_id = ?', (user_id, c_id))
+            else:
+                cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, 1)', (user_id, c_id))
+
+            pull_results.append({'card_id': c_id, 'name': c_name, 'rarity': rarity, 'value': c_value, 'image': c_image, 'color': rarity_colors[rarity]})
+
+        pull_results.sort(key=lambda r: RARITY_ORDER.get(r['rarity'], 99))
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (gacha_cost, user_id))
+        conn.commit()
+
+        view = BulkGachaView(message.author, pull_results, len(pull_results))
+        await message.channel.send(f"🎉 {message.author.mention} pulled cards!", embed=view.create_embed(), view=view)
+        all_rarities = [r['rarity'] for r in pull_results]
+        await award_xp(message.guild.id, message.author, all_rarities, message.channel)
+    except Exception as e:
+        conn.rollback()
+        await message.channel.send(f"An error occurred during bulk gacha: {e}")
+
+# --- 7. trade ---
+async def px_trade(message, args):
+    if not message.mentions:
+        return await message.channel.send("❌ Usage: `Atcg trade <@user> <card name/id> <amount> <quantity>`")
+    target_user = message.mentions[0]
+    rest = strip_mentions(args)
+    if len(rest) < 3 or not rest[-1].isdigit() or not rest[-2].isdigit():
+        return await message.channel.send("❌ Usage: `Atcg trade <@user> <card name/id> <amount> <quantity>`")
+    quantity = int(rest[-1])
+    trade_amount = int(rest[-2])
+    card_name_or_id = " ".join(rest[:-2])
+
+    cursor.execute('SELECT c.card_id, c.name, c.rarity, c.value, c.image, i.quantity FROM inventory i JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)', (str(message.author.id), card_name_or_id, card_name_or_id))
+    card = cursor.fetchone()
+    if not card or card[5] < quantity:
+        return await message.channel.send("❌ You don't have enough copies!")
+    embed = discord.Embed(title="🤝 Trade Offer", color=discord.Color.blue())
+    embed.add_field(name="Details", value=f"**Seller:** {message.author.name}\n**Card:** {card[1]}\n**Qty:** {quantity}\n**Total:** {trade_amount * quantity} 🪙")
+    embed.set_image(url=card[4])
+    try:
+        await target_user.send(embed=embed, view=SaleView(message.author, target_user, card, trade_amount, quantity))
+        await message.channel.send(f"✅ Offer sent to {target_user.name}!")
+    except:
+        await message.channel.send("❌ User has DMs closed!")
+
+# --- 8. card_list ---
+async def px_card_list(message, args):
+    text = " ".join(args)
+    rarity, anime = extract_rarity_anime(text)
+
+    base_query = "SELECT card_id, name, rarity, value, image, anime FROM cards WHERE 1=1"
+    params = []
+    if rarity:
+        base_query += " AND rarity = ?"; params.append(rarity)
+    if anime:
+        base_query += " AND anime = ?"; params.append(anime)
+
+    sort_templates = {
+        "value_asc": " ORDER BY value ASC",
+        "value_desc": " ORDER BY value DESC",
+        "id_asc": " ORDER BY CAST(card_id AS INTEGER) ASC",
+        "id_desc": " ORDER BY CAST(card_id AS INTEGER) DESC",
+    }
+    local_cursor = conn.cursor()
+    local_cursor.execute(base_query + sort_templates["value_asc"], params)
+    cards = local_cursor.fetchall()
+
+    if not cards:
+        return await message.channel.send(embed=discord.Embed(description="⚠️ No cards match those filters.", color=discord.Color.orange()))
+
+    view = CardPaginator(cards, 0, "Card List")
+    view.add_item(PrefixSortSelect(message.author.id, base_query, params, sort_templates))
+    await message.channel.send(embed=view.create_embed(), view=view)
+
+# --- 9. burn ---
+async def px_burn(message, args):
+    if not args:
+        return await message.channel.send("❌ Usage: `Atcg burn <card name/id> [quantity]`")
+    if args[-1].isdigit():
+        quantity = int(args[-1])
+        card_name = " ".join(args[:-1])
+    else:
+        quantity = 1
+        card_name = " ".join(args)
+
+    if quantity <= 0 or not card_name:
+        return await message.channel.send("❌ Usage: `Atcg burn <card name/id> [quantity]`")
+
+    user_id = str(message.author.id)
+    cursor.execute("SELECT card_id, name, rarity, value, image FROM cards WHERE name = ? OR card_id = ?", (card_name, card_name))
+    card = cursor.fetchone()
+    if not card:
+        return await message.channel.send(embed=discord.Embed(description="❌ You don't have that card", color=discord.Color.red()))
+
+    c_id, name, rarity, value, image = card
+    burn_value_per_card = int(value * 0.5)
+    total_received = burn_value_per_card * quantity
+
+    cursor.execute("SELECT quantity FROM inventory WHERE user_id = ? AND card_id = ?", (user_id, c_id))
+    inv_data = cursor.fetchone()
+    if not inv_data or inv_data[0] < quantity:
+        return await message.channel.send(embed=discord.Embed(description="❌ You don't have enough cards", color=discord.Color.red()))
+
+    if inv_data[0] == quantity:
+        cursor.execute("DELETE FROM inventory WHERE user_id = ? AND card_id = ?", (user_id, c_id))
+    else:
+        cursor.execute("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?", (quantity, user_id, c_id))
+    cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (total_received, user_id))
+    conn.commit()
+
+    embed = discord.Embed(description=f"**{message.author.name}** successfully burned cards", color=discord.Color.green())
+    embed.add_field(name="Name", value=name, inline=True)
+    embed.add_field(name="Rarity", value=rarity, inline=True)
+    embed.add_field(name="Id", value=f"`{c_id}`", inline=True)
+    embed.add_field(name="Value", value=f"{value} 🪙", inline=True)
+    embed.add_field(name="Quantity", value=str(quantity), inline=True)
+    embed.add_field(name="Amount received", value=f"{total_received} 🪙", inline=True)
+    if image:
+        embed.set_image(url=image)
+    await message.channel.send(embed=embed)
+
+# --- 10. bulk_burn ---
+class PrefixBulkBurnView(ui.View):
+    def __init__(self, owner_id):
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+        self.filter_value = None
+        self.rarity_value = None
+        self.anime_value = None
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+            return False
+        return True
+
+    @ui.select(placeholder="Select Filter (required)", options=[
+        discord.SelectOption(label="Burn all cards", value="all"),
+        discord.SelectOption(label="Burn all duplicate cards", value="duplicates"),
+    ])
+    async def select_filter(self, interaction: discord.Interaction, select: ui.Select):
+        self.filter_value = select.values[0]
+        await interaction.response.defer()
+        await self.maybe_run(interaction)
+
+    async def maybe_run(self, interaction):
+        if self.filter_value:
+            await run_bulk_burn(interaction.message, self.owner_id, self.filter_value, self.rarity_value, self.anime_value)
+            self.stop()
+
+class PrefixBulkBurnRaritySelect(ui.Select):
+    def __init__(self, parent_view):
+        cursor.execute("SELECT name FROM rarities")
+        options = [discord.SelectOption(label=r[0], value=r[0]) for r in cursor.fetchall()][:25]
+        super().__init__(placeholder="Select Rarity (optional)", options=options)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.rarity_value = self.values[0]
+        await interaction.response.defer()
+
+class PrefixBulkBurnAnimeSelect(ui.Select):
+    def __init__(self, parent_view):
+        cursor.execute("SELECT name FROM anime")
+        options = [discord.SelectOption(label=r[0], value=r[0]) for r in cursor.fetchall()][:25]
+        super().__init__(placeholder="Select Anime (optional)", options=options)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.anime_value = self.values[0]
+        await interaction.response.defer()
+
+async def run_bulk_burn(message_or_channel_msg, user_id_int, filter_value, rarity, anime):
+    local_cursor = conn.cursor()
+    query = '''SELECT c.card_id, c.rarity, c.value, i.quantity FROM inventory i
+               JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?'''
+    params = [str(user_id_int)]
+    if rarity:
+        query += " AND c.rarity = ?"; params.append(rarity)
+    if anime:
+        query += " AND c.anime = ?"; params.append(anime)
+    local_cursor.execute(query, params)
+    owned = local_cursor.fetchall()
+
+    rarity_counts = {"Common": 0, "Uncommon": 0, "Rare": 0, "Epic": 0, "Legendary": 0, "Super Legendary": 0}
+    total_coins = 0
+    total_burned = 0
+    for card_id, card_rarity, value, quantity in owned:
+        burn_qty = quantity if filter_value == "all" else quantity - 1
+        if burn_qty <= 0:
+            continue
+        coins = int(value * burn_qty * 0.5)
+        total_coins += coins
+        total_burned += burn_qty
+        rarity_counts[card_rarity] = rarity_counts.get(card_rarity, 0) + burn_qty
+        if burn_qty == quantity:
+            local_cursor.execute("DELETE FROM inventory WHERE user_id = ? AND card_id = ?", (str(user_id_int), card_id))
+        else:
+            local_cursor.execute("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?", (burn_qty, str(user_id_int), card_id))
+
+    channel = message_or_channel_msg.channel
+    if total_burned == 0:
+        return await channel.send(embed=discord.Embed(description="⚠️ No cards matched those filters to burn.", color=discord.Color.orange()))
+
+    local_cursor.execute("INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?", (str(user_id_int), total_coins, total_coins))
+    conn.commit()
+
+    embed = discord.Embed(
+        title=f"{total_burned} Cards burned.",
+        description=(
+            f"Common: {rarity_counts['Common']} Cards\nUncommon: {rarity_counts['Uncommon']} Cards\nRare: {rarity_counts['Rare']} Cards\n"
+            f"Epic: {rarity_counts['Epic']} Cards\nLegendary: {rarity_counts['Legendary']} Cards\nSuper Legendary: {rarity_counts['Super Legendary']} Cards\n\n"
+            f"<@{user_id_int}> received **{total_coins}** 🪙."
+        ),
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
+
+async def px_bulk_burn(message, args):
+    view = PrefixBulkBurnView(message.author.id)
+    view.add_item(PrefixBulkBurnRaritySelect(view))
+    view.add_item(PrefixBulkBurnAnimeSelect(view))
+    await message.channel.send("Select a filter (required), and optionally a rarity and anime:", view=view)
+
+# --- 11. market_sell ---
+async def px_market_sell(message, args):
+    if len(args) >= 2 and args[-1].isdigit() and args[-2].isdigit():
+        quantity = int(args[-1]); price = int(args[-2]); name_tokens = args[:-2]
+    elif len(args) >= 1 and args[-1].isdigit():
+        price = int(args[-1]); quantity = 1; name_tokens = args[:-1]
+    else:
+        return await message.channel.send("❌ Usage: `Atcg market sell <card name/id> <price> [quantity]`")
+
+    card_name = " ".join(name_tokens)
+    if price < 0 or quantity <= 0 or not card_name:
+        return await message.channel.send("❌ Invalid price or quantity.")
+
+    cursor.execute('''SELECT i.quantity, c.card_id, c.name FROM inventory i
+                      JOIN cards c ON i.card_id = c.card_id
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''',
+                   (str(message.author.id), card_name, card_name))
+    row = cursor.fetchone()
+    if not row or row[0] < quantity:
+        return await message.channel.send("❌ You don't have enough of that card to sell!")
+
+    card_id, real_name = row[1], row[2]
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(message.author.id), card_id))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+    cursor.execute('INSERT INTO market (seller_id, card_id, price, quantity) VALUES (?, ?, ?, ?)', (str(message.author.id), card_id, price, quantity))
+    conn.commit()
+    await message.channel.send(f"✅ Listed {quantity}x **{real_name}** for {price} 🪙 each.")
+
+# --- 12. market ---
+async def px_market(message, args):
+    cursor.execute('''SELECT m.selling_id, m.seller_id, m.price, m.quantity,
+                             c.card_id, c.name, c.rarity, c.value, c.image
+                      FROM market m JOIN cards c ON m.card_id = c.card_id''')
+    listings = cursor.fetchall()
+    if not listings:
+        return await message.channel.send(embed=discord.Embed(description="🛒 The market is currently empty!", color=discord.Color.orange()))
+    view = MarketPaginator(listings, client)
+    await message.channel.send(embed=await view.create_embed(), view=view)
+
+# --- 13. remove_market ---
+async def px_remove_market(message, args):
+    if not args or not args[0].isdigit():
+        return await message.channel.send("❌ Usage: `Atcg remove market <selling id>`")
+    listing_id = int(args[0])
+    cursor.execute('''SELECT m.seller_id, m.card_id, m.quantity, c.name FROM market m
+                      JOIN cards c ON m.card_id = c.card_id WHERE m.selling_id = ?''', (listing_id,))
+    listing = cursor.fetchone()
+    if not listing:
+        return await message.channel.send(embed=discord.Embed(description="⚠️ Market listing not found.", color=discord.Color.red()))
+    seller_id, card_id, qty, card_name = listing
+    if str(message.author.id) != str(seller_id):
+        return await message.channel.send(embed=discord.Embed(description=f"{message.author.mention}, You can't remove someone else's card.", color=discord.Color.red()))
+    cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(message.author.id), card_id, qty, qty))
+    cursor.execute('DELETE FROM market WHERE selling_id = ?', (listing_id,))
+    conn.commit()
+    await message.channel.send(embed=discord.Embed(description=f"{message.author.mention}, Successfully removed **{card_name}** from the market.", color=discord.Color.green()))
+
+# --- 14. gift_card ---
+async def px_gift_card(message, args):
+    if not message.mentions:
+        return await message.channel.send("❌ Usage: `Atcg gift card <@user> <card name/id> [quantity]`")
+    target_user = message.mentions[0]
+    rest = strip_mentions(args)
+    if rest and rest[-1].isdigit():
+        quantity = int(rest[-1]); card_name = " ".join(rest[:-1])
+    else:
+        quantity = 1; card_name = " ".join(rest)
+
+    if target_user.id == message.author.id:
+        return await message.channel.send("❌ You can't gift cards to yourself!")
+    if quantity <= 0 or not card_name:
+        return await message.channel.send("❌ Usage: `Atcg gift card <@user> <card name/id> [quantity]`")
+
+    cursor.execute('''SELECT c.card_id, i.quantity, c.name, c.rarity, c.value, c.image
+                      FROM inventory i JOIN cards c ON i.card_id = c.card_id
+                      WHERE i.user_id = ? AND (c.name = ? OR c.card_id = ?)''',
+                   (str(message.author.id), card_name, card_name))
+    card = cursor.fetchone()
+    if not card:
+        return await message.channel.send(embed=discord.Embed(description="⚠️ You don't have that card in inventory", color=discord.Color.red()))
+    if card[1] < quantity:
+        return await message.channel.send(embed=discord.Embed(description="⚠️ You don't have that much card in inventory", color=discord.Color.red()))
+
+    card_id, _, name, rarity, value, image = card
+    cursor.execute('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?', (quantity, str(message.author.id), card_id))
+    cursor.execute('INSERT INTO inventory (user_id, card_id, quantity) VALUES (?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?', (str(target_user.id), card_id, quantity, quantity))
+    cursor.execute('DELETE FROM inventory WHERE quantity <= 0')
+    conn.commit()
+
+    cursor.execute('SELECT COUNT(DISTINCT user_id) FROM inventory WHERE card_id = ?', (card_id,))
+    owners = cursor.fetchone()[0]
+
+    dm_embed = discord.Embed(description=f"{message.author.mention} has gifted you **{name}** 🎁", color=discord.Color.green())
+    dm_embed.add_field(name="Details", value=(
+        f"**Name of card:** {name}\n**Rarity:** {rarity}\n**Value:** {value} 🪙\n**Card id:** `{card_id}`\n**Quantity:** {quantity}\n**Owners:** {owners} 👥"
+    ), inline=False)
+    dm_embed.set_image(url=image)
+
+    try:
+        await target_user.send(embed=dm_embed)
+        await message.channel.send(f"✅ Successfully gifted {quantity}x {name} to {target_user.name}!")
+    except discord.Forbidden:
+        await message.channel.send(f"✅ Successfully gifted to {target_user.name}, but their DMs are closed so I couldn't notify them.")
+
+# --- 15. gift_coin ---
+async def px_gift_coin(message, args):
+    if not message.mentions:
+        return await message.channel.send("❌ Usage: `Atcg gift coin <@user> <amount>`")
+    target_user = message.mentions[0]
+    rest = strip_mentions(args)
+    if not rest or not rest[-1].isdigit():
+        return await message.channel.send("❌ Usage: `Atcg gift coin <@user> <amount>`")
+    amount = int(rest[-1])
+
+    if target_user.id == message.author.id:
+        return await message.channel.send("❌ You can't gift coins to yourself!")
+    if amount <= 0:
+        return await message.channel.send("❌ You must gift at least 1 coin!")
+
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(message.author.id),))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+    if balance < amount:
+        return await message.channel.send(embed=discord.Embed(description=f"⚠️ You don't have enough balance\n**Balance:** {balance} 🪙", color=discord.Color.red()))
+
+    cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, str(message.author.id)))
+    cursor.execute('INSERT INTO users (id, balance) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?', (str(target_user.id), amount, amount))
+    conn.commit()
+
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(target_user.id),))
+    receiver_balance = cursor.fetchone()[0]
+    dm_embed = discord.Embed(description=f"{message.author.mention} has gifted you **{amount}** 🪙 coins 🎁\n**Balance:** {receiver_balance} 🪙", color=discord.Color.green())
+    try:
+        await target_user.send(embed=dm_embed)
+        await message.channel.send(f"✅ Successfully gifted {amount} coins to {target_user.name}!")
+    except discord.Forbidden:
+        await message.channel.send(f"✅ Successfully gifted to {target_user.name}, but their DMs are closed so I couldn't notify them.")
+
+# --- 16. crate ---
+async def px_crate(message, args):
+    local_cursor = conn.cursor()
+    local_cursor.execute('''
+        SELECT c.crate_id, c.crate_name, ci.quantity FROM crate_inventory ci
+        JOIN Crate c ON ci.crate_id = c.crate_id
+        WHERE ci.user_id = ? AND ci.quantity > 0 ORDER BY c.crate_name
+    ''', (str(message.author.id),))
+    crates = local_cursor.fetchall()
+    if not crates:
+        return await message.channel.send(embed=discord.Embed(description="❌ You don't have any crates to open.", color=discord.Color.red()))
+    embed = discord.Embed(title="Open a Crate <:crate:1537797263714295819>", description="Select a crate from below to open it.", color=discord.Color.red())
+    await message.channel.send(embed=embed, view=CrateOpenView(message.author.id, crates))
+
+# --- 17. account ---
+async def px_account(message, args):
+    if not args or args[0].lower() not in ("public", "private"):
+        return await message.channel.send("❌ Usage: `Atcg account <public/private>`")
+    status_value = args[0].lower()
+    cursor.execute('INSERT INTO users (id, account_status) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET account_status = ?', (str(message.author.id), status_value, status_value))
+    conn.commit()
+    await message.channel.send(f"✅ Your account is now **{status_value.capitalize()}**.")
+
+# --- 18. balance ---
+async def px_balance(message, args):
+    target = message.mentions[0] if message.mentions else message.author
+    if target.id != message.author.id:
+        cursor.execute('SELECT account_status FROM users WHERE id = ?', (str(target.id),))
+        row = cursor.fetchone()
+        status = row[0] if row else "public"
+        if status == "private":
+            return await message.channel.send(embed=discord.Embed(description=f"❌ {target.mention}'s profile is private. You can't check the balance.", color=discord.Color.red()))
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(target.id),))
+    row = cursor.fetchone()
+    bal = row[0] if row else 0
+    embed = discord.Embed(title=f"{target.name}'s balance", description=f"**Balance:** {bal} 🪙", color=0xFFFF00)
+    await message.channel.send(embed=embed)
+
+# --- 19. beg ---
+async def px_beg(message, args):
+    now = datetime.datetime.now()
+    cursor.execute('SELECT last_beg, balance FROM users WHERE id = ?', (str(message.author.id),))
+    row = cursor.fetchone()
+    if row and row[0]:
+        last_time = datetime.datetime.fromisoformat(row[0])
+        if now < last_time + datetime.timedelta(minutes=30):
+            diff = (last_time + datetime.timedelta(minutes=30)) - now
+            minutes = int(diff.total_seconds() // 60)
+            return await message.channel.send(embed=discord.Embed(description=f"{message.author.mention}\nYou can't beg now. God is busy fulfilling the wishes of others. Please wait **{minutes}** more minutes.", color=discord.Color.red()))
+
+    amount = random.randint(1, 250)
+    cursor.execute('INSERT INTO users (id, balance, last_beg) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_beg = ?', (str(message.author.id), amount, now.isoformat(), amount, now.isoformat()))
+    conn.commit()
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(message.author.id),))
+    new_bal = cursor.fetchone()[0]
+    embed = discord.Embed(title=f"{message.author.name}", description=f"God showed mercy on you. You received **{amount}** 🪙 coins!\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
+    await message.channel.send(embed=embed)
+
+# --- 20. daily ---
+async def px_daily(message, args):
+    now = datetime.datetime.now()
+    cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(message.author.id),))
+    row = cursor.fetchone()
+    if row and row[0]:
+        last_time = datetime.datetime.fromisoformat(row[0])
+        if now.date() == last_time.date():
+            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
+            diff = tomorrow - now
+            hours, remainder = divmod(int(diff.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+            return await message.channel.send(embed=discord.Embed(description=f"{message.author.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red()))
+
+    amount = random.randint(500, 1000)
+    cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(message.author.id), amount, now.isoformat(), amount, now.isoformat()))
+    conn.commit()
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(message.author.id),))
+    new_bal = cursor.fetchone()[0]
+    await message.channel.send(embed=discord.Embed(description=f"{message.author.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00))
+
+# --- 21. cointoss ---
+async def px_cointoss(message, args):
+    amount = None
+    call = None
+    for a in args:
+        if a.isdigit() and amount is None:
+            amount = int(a)
+        elif a.lower() in ("head", "h", "tail", "t") and call is None:
+            call = "Head" if a.lower() in ("head", "h") else "Tail"
+    if amount is None or call is None:
+        return await message.channel.send("❌ Usage: `Atcg cointoss <amount> <head/tail>`")
+
+    user_id = str(message.author.id)
+    cursor.execute('SELECT balance FROM users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    balance = row[0] if row else 0
+
+    if amount <= 0 or amount > balance:
+        return await message.channel.send(embed=discord.Embed(description=f"❌ You have insufficient balance.\n**Your balance:** {balance} 🪙", color=discord.Color.red()))
+
+    outcome = random.choice(["Head", "Tail"])
+    if outcome == call:
+        winnings = amount * 2
+        cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (winnings - amount, user_id))
+        conn.commit()
+        embed = discord.Embed(description=f"It was **{outcome}** and your call was **{call}**\nYou won **{winnings}** 🪙", color=discord.Color.green())
+    else:
+        cursor.execute('UPDATE users SET balance = balance - ? WHERE id = ?', (amount, user_id))
+        conn.commit()
+        embed = discord.Embed(description=f"It was **{outcome}** and your call was **{call}**\nYou lost **{amount}** 🪙", color=discord.Color.red())
+    await message.channel.send(embed=embed)
+
+# --- 22. level ---
+async def px_level(message, args):
+    target = message.mentions[0] if message.mentions else message.author
+    local_cursor = conn.cursor()
+    local_cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (str(message.guild.id), str(target.id)))
+    row = local_cursor.fetchone()
+    lvl, xp = row if row else (0, 0)
+    next_xp = xp_required_for_level(lvl + 1)
+    avatar_bytes = await target.display_avatar.read()
+    img = await asyncio.to_thread(generate_level_image, avatar_bytes, lvl, xp, next_xp)
+    await message.channel.send(file=discord.File(fp=img, filename="level.png"))
+
+# --- 23. leaderboard ---
+async def px_leaderboard(message, args):
+    type_value = "balance"
+    if args:
+        arg_lower = args[0].lower()
+        if arg_lower.startswith("bal"):
+            type_value = "balance"
+        elif arg_lower.startswith("card"):
+            type_value = "card"
+        elif arg_lower.startswith("lvl") or arg_lower.startswith("level"):
+            type_value = "level"
+
+    rows_data, title, header_label = await build_leaderboard_rows(type_value, message.guild.id)
+    if not rows_data:
+        return await message.channel.send(embed=discord.Embed(description="No data yet for this leaderboard.", color=discord.Color.orange()))
+    img = await asyncio.to_thread(generate_leaderboard_image, title, header_label, rows_data)
+    view = LeaderboardView(message.guild.id)
+    await message.channel.send(file=discord.File(fp=img, filename="leaderboard.png"), view=view)
+
+# --- 24. help ---
+async def px_help(message, args):
+    view = HelpPaginator(HELP_PAGES)
+    await message.channel.send(embed=view.create_embed(), view=view)
+
+
+# --- Dispatch table: each entry is (alias word-tuple, handler function) ---
+PREFIX_ALIASES = [
+    (("rank",), px_rank),
+    (("inventory",), px_inventory),
+    (("view", "card"), px_view_card),
+    (("card", "view"), px_view_card),
+    (("viewcard",), px_view_card),
+    (("vc",), px_view_card),
+    (("rarity", "list"), px_rarity_list),
+    (("gacha",), px_gacha),
+    (("trade",), px_trade),
+    (("card", "list"), px_card_list),
+    (("cardlist",), px_card_list),
+    (("cl",), px_card_list),
+    (("bulk", "burn"), px_bulk_burn),
+    (("burn",), px_burn),
+    (("market", "sell"), px_market_sell),
+    (("ms",), px_market_sell),
+    (("sell",), px_market_sell),
+    (("remove", "market"), px_remove_market),
+    (("market", "remove"), px_remove_market),
+    (("rm",), px_remove_market),
+    (("remove",), px_remove_market),
+    (("market",), px_market),
+    (("gift", "card"), px_gift_card),
+    (("card", "gift"), px_gift_card),
+    (("gcard",), px_gift_card),
+    (("gift", "coin"), px_gift_coin),
+    (("coin", "gift"), px_gift_coin),
+    (("gcoin",), px_gift_coin),
+    (("crate",), px_crate),
+    (("account",), px_account),
+    (("balance",), px_balance),
+    (("beg",), px_beg),
+    (("daily",), px_daily),
+    (("cointoss",), px_cointoss),
+    (("ct",), px_cointoss),
+    (("level",), px_level),
+    (("leaderboard",), px_leaderboard),
+    (("lb",), px_leaderboard),
+    (("help",), px_help),
+]
+# Longest alias first, so "market sell" is checked before bare "market"
+PREFIX_ALIASES.sort(key=lambda pair: -len(pair[0]))
+
+async def route_prefix_command(message):
+    content = message.content.strip()
+    if not content.lower().startswith(PREFIX):
+        return False
+    remainder = content[len(PREFIX):].strip()
+    if not remainder:
+        return False
+
+    tokens = remainder.split()
+    lowered = [t.lower() for t in tokens]
+
+    for alias_tuple, handler in PREFIX_ALIASES:
+        n = len(alias_tuple)
+        if lowered[:n] == list(alias_tuple):
+            args = tokens[n:]
+            try:
+                await handler(message, args)
+            except Exception as e:
+                await message.channel.send(f"⚠️ Something went wrong running that command: {e}")
+            return True
+    return False
+    
+
+
 
 if __name__ == '__main__':
     Thread(target=run_flask).start()
