@@ -1615,66 +1615,6 @@ async def balance(interaction: discord.Interaction, user: discord.Member = None)
 
 
 
-@client.tree.command(name="login", description="Get your Web Portal ID and Password")
-async def login(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    user_id = str(interaction.user.id)
-    username = interaction.user.name
-    
-    # Run the upload in a non-blocking background thread
-    discord_pfp = interaction.user.display_avatar.url
-    pfp = await asyncio.to_thread(upload_to_catbox_sync, discord_pfp)
-    
-    # Check if user already has an ID and Password
-    cursor.execute("SELECT web_id, web_password FROM users WHERE id = ?", (user_id,))
-    row = cursor.fetchone()
-    
-    if row and row[0] and row[1]:
-        web_id, web_pass = row[0], row[1]
-        
-        # Existing user: update username and permanent catbox PFP
-        cursor.execute("""
-            UPDATE users SET username = ?, pfp = ? WHERE id = ?
-        """, (username, pfp, user_id))
-        conn.commit()
-    else:
-        # New user: generate unique 10-digit ID and 4-digit PIN
-        while True:
-            new_id = "".join([str(random.randint(0, 9)) for _ in range(10)])
-            cursor.execute("SELECT id FROM users WHERE web_id = ?", (new_id,))
-            if not cursor.fetchone(): 
-                break
-        new_pass = "".join([str(random.randint(0, 9)) for _ in range(4)])
-        
-        # Insert user along with initial credentials, username, and permanent pfp
-        cursor.execute("""
-            INSERT INTO users (id, web_id, web_password, username, pfp) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET 
-                web_id = ?, 
-                web_password = ?, 
-                username = ?, 
-                pfp = ?
-        """, (user_id, new_id, new_pass, username, pfp, new_id, new_pass, username, pfp))
-        conn.commit()
-        web_id, web_pass = new_id, new_pass
-
-    WEBSITE_URL = "https://your-website-link.vercel.app"
-
-    embed = discord.Embed(
-        title="🔑 Web Portal Login Credentials",
-        description="Click on the ID and Password below to copy them to your clipboard!",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Id", value=f"`{web_id}`", inline=True)
-    embed.add_field(name="Password", value=f"`{web_pass}`", inline=True)
-    embed.add_field(
-        name="Link", 
-        value=f"[Open website]({WEBSITE_URL})", 
-        inline=False
-    )
-    embed.set_footer(text="Keep your password private!")
-    await interaction.followup.send(embed=embed, ephemeral=True)
-    
 
 @client.tree.command(name="beg", description="Ask for some spare coins")
 async def beg(interaction: discord.Interaction):
