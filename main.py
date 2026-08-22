@@ -1746,9 +1746,7 @@ async def leaderboard(interaction: discord.Interaction, type: app_commands.Choic
 
 
 
-@client.tree.command(name="help", description="List all available commands and how to play")
-async def help(interaction: discord.Interaction):
-    pages = [
+HELP_PAGES = [
     # Page 1: Welcome Page
     "# **Welcome to Anime TCG**\n\nYou can collect your Anime TCG in the #**Anime TCG** channel. You can earn coins by chatting with others and by using member commands. You can use either `/` slash commands or `Atcg` prefix commands — both do the same thing. If you find any problem or bug in the Anime TCG you can report it to the owner. Play responsibly and start collecting.",
 
@@ -1777,8 +1775,10 @@ async def help(interaction: discord.Interaction):
     "**⚖️ Prefix — Market & Leaderboards**\n\n`Atcg market`\n`Atcg market sell <card> <price> [qty]` (aliases: `ms`, `sell`)\n`Atcg remove market <id>` (aliases: `rm`, `remove`, `market remove`)\n`Atcg leaderboard [balance/card/level]` (alias: `lb`)\n`Atcg help`"
 ]
 
-    
-    view = HelpPaginator(pages)
+
+@client.tree.command(name="help", description="List all available commands and how to play")
+async def help(interaction: discord.Interaction):
+    view = HelpPaginator(HELP_PAGES)
     # ephemeral=True ensures only the sender can see this yellow embed
     await interaction.response.send_message(embed=view.create_embed(), view=view, ephemeral=True)
             
@@ -2625,7 +2625,7 @@ async def px_leaderboard(message, args):
 
 # --- 24. help ---
 async def px_help(message, args):
-    view = HelpPaginator(pages)
+    view = HelpPaginator(HELP_PAGES)
     await message.channel.send(embed=view.create_embed(), view=view)
 
 
