@@ -2,7 +2,7 @@ name: Restart Bot
 
 on:
   schedule:
-    - cron: '* * * * *'  # Every 1 minute
+    - cron: '0 */2 * * *'  # Every 2 hours
 permissions:
   contents: write
 jobs:
