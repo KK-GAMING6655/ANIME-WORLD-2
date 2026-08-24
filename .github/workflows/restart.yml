@@ -2,8 +2,7 @@ name: Restart Bot
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours
-
+    - cron: '* * * * *'  # Every 1 minute
 jobs:
   restart:
     runs-on: ubuntu-latest
