@@ -1,0 +1,20 @@
+name: Restart Bot
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Update restart file
+        run: echo "Restarted at $(date)" > restart.txt
+      - name: Commit and push
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add restart.txt
+          git commit -m "Auto-restart bot"
+          git push
