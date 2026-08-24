@@ -3,6 +3,8 @@ name: Restart Bot
 on:
   schedule:
     - cron: '* * * * *'  # Every 1 minute
+permissions:
+  contents: write
 jobs:
   restart:
     runs-on: ubuntu-latest
