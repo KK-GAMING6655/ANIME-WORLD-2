@@ -11,6 +11,7 @@ import urllib.request
 import urllib.parse
 from PIL import Image, ImageDraw, ImageFont
 import io
+import math
 
 # --- 1. WEB SERVER ---
 app = Flask(__name__)
@@ -75,6 +76,11 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS favourite_card (
                         user_id TEXT PRIMARY KEY,
                         card_id TEXT)''')
+
+    cursor.execute("PRAGMA table_info(users)")
+    users_columns = [column[1] for column in cursor.fetchall()]
+    if "daily_streak" not in users_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN daily_streak INTEGER DEFAULT 0")
     
 
     # 2. AUTO-REPAIR: Ensure columns exist in the cloud
@@ -1307,6 +1313,128 @@ async def gacha(interaction: discord.Interaction):
     await award_xp(interaction.guild.id, interaction.user, [chosen_rarity], interaction.channel)
 
 
+#daily setup
+
+DAILY_MULTIPLIERS = {
+    1: 1.00, 2: 1.15, 3: 1.23, 4: 1.28, 5: 1.34, 6: 1.40, 7: 1.50, 8: 1.52,
+    9: 1.55, 10: 1.57, 11: 1.60, 12: 1.62, 13: 1.65, 14: 1.75, 15: 1.53, 16: 1.55,
+    17: 1.58, 18: 1.61, 19: 1.63, 20: 1.66, 21: 1.69, 22: 1.71, 23: 1.74, 24: 1.77,
+    25: 1.79, 26: 1.82, 27: 1.85, 28: 1.87, 29: 1.90, 30: 2.00, 31: 2.02, 32: 2.04,
+    33: 2.06, 34: 2.08, 35: 2.11, 36: 2.13, 37: 2.15, 38: 2.17, 39: 2.19, 40: 2.21,
+    41: 2.23, 42: 2.25, 43: 2.27, 44: 2.29, 45: 2.32, 46: 2.34, 47: 2.36, 48: 2.38,
+    49: 2.40, 50: 2.50, 51: 2.51, 52: 2.52, 53: 2.52, 54: 2.53, 55: 2.54, 56: 2.55,
+    57: 2.56, 58: 2.57, 59: 2.57, 60: 2.58, 61: 2.59, 62: 2.60, 63: 2.61, 64: 2.61,
+    65: 2.62, 66: 2.63, 67: 2.64, 68: 2.65, 69: 2.66, 70: 2.66, 71: 2.67, 72: 2.68,
+    73: 2.69, 74: 2.70, 75: 2.70, 76: 2.71, 77: 2.72, 78: 2.73, 79: 2.74, 80: 2.74,
+    81: 2.75, 82: 2.76, 83: 2.77, 84: 2.78, 85: 2.79, 86: 2.79, 87: 2.80, 88: 2.81,
+    89: 2.82, 90: 2.83, 91: 2.83, 92: 2.84, 93: 2.85, 94: 2.86, 95: 2.87, 96: 2.88,
+    97: 2.88, 98: 2.89, 99: 2.90, 100: 3.00, 101: 3.01, 102: 3.02, 103: 3.03, 104: 3.04,
+    105: 3.05, 106: 3.05, 107: 3.06, 108: 3.07, 109: 3.08, 110: 3.09, 111: 3.10, 112: 3.11,
+    113: 3.12, 114: 3.13, 115: 3.14, 116: 3.15, 117: 3.15, 118: 3.16, 119: 3.17, 120: 3.18,
+    121: 3.19, 122: 3.20, 123: 3.21, 124: 3.22, 125: 3.23, 126: 3.24, 127: 3.25, 128: 3.25,
+    129: 3.26, 130: 3.27, 131: 3.28, 132: 3.29, 133: 3.30, 134: 3.31, 135: 3.32, 136: 3.33,
+    137: 3.34, 138: 3.35, 139: 3.35, 140: 3.36, 141: 3.37, 142: 3.38, 143: 3.39, 144: 3.40,
+    145: 3.41, 146: 3.42, 147: 3.43, 148: 3.44, 149: 3.45, 150: 3.45, 151: 3.46, 152: 3.47,
+    153: 3.48, 154: 3.49, 155: 3.50, 156: 3.51, 157: 3.52, 158: 3.53, 159: 3.54, 160: 3.55,
+    161: 3.55, 162: 3.56, 163: 3.57, 164: 3.58, 165: 3.59, 166: 3.60, 167: 3.61, 168: 3.62,
+    169: 3.63, 170: 3.64, 171: 3.65, 172: 3.65, 173: 3.66, 174: 3.67, 175: 3.68, 176: 3.69,
+    177: 3.70, 178: 3.71, 179: 3.72, 180: 3.73, 181: 3.74, 182: 3.75, 183: 3.75, 184: 3.76,
+    185: 3.77, 186: 3.78, 187: 3.79, 188: 3.80, 189: 3.81, 190: 3.82, 191: 3.83, 192: 3.84,
+    193: 3.85, 194: 3.85, 195: 3.86, 196: 3.87, 197: 3.88, 198: 3.89, 199: 3.90, 200: 4.00,
+    201: 4.01, 202: 4.01, 203: 4.02, 204: 4.02, 205: 4.03, 206: 4.03, 207: 4.04, 208: 4.04,
+    209: 4.05, 210: 4.05, 211: 4.06, 212: 4.07, 213: 4.07, 214: 4.08, 215: 4.08, 216: 4.09,
+    217: 4.09, 218: 4.10, 219: 4.10, 220: 4.11, 221: 4.12, 222: 4.12, 223: 4.13, 224: 4.13,
+    225: 4.14, 226: 4.14, 227: 4.15, 228: 4.15, 229: 4.16, 230: 4.16, 231: 4.17, 232: 4.18,
+    233: 4.18, 234: 4.19, 235: 4.19, 236: 4.20, 237: 4.20, 238: 4.21, 239: 4.21, 240: 4.22,
+    241: 4.22, 242: 4.23, 243: 4.24, 244: 4.24, 245: 4.25, 246: 4.25, 247: 4.26, 248: 4.26,
+    249: 4.27, 250: 4.27, 251: 4.28, 252: 4.29, 253: 4.29, 254: 4.30, 255: 4.30, 256: 4.31,
+    257: 4.31, 258: 4.32, 259: 4.32, 260: 4.33, 261: 4.33, 262: 4.34, 263: 4.35, 264: 4.35,
+    265: 4.36, 266: 4.36, 267: 4.37, 268: 4.37, 269: 4.38, 270: 4.38, 271: 4.39, 272: 4.40,
+    273: 4.40, 274: 4.41, 275: 4.41, 276: 4.42, 277: 4.42, 278: 4.43, 279: 4.43, 280: 4.44,
+    281: 4.44, 282: 4.45, 283: 4.46, 284: 4.46, 285: 4.47, 286: 4.47, 287: 4.48, 288: 4.48,
+    289: 4.49, 290: 4.49, 291: 4.50, 292: 4.50, 293: 4.51, 294: 4.52, 295: 4.52, 296: 4.53,
+    297: 4.53, 298: 4.54, 299: 4.54, 300: 4.55, 301: 4.55, 302: 4.56, 303: 4.57, 304: 4.57,
+    305: 4.58, 306: 4.58, 307: 4.59, 308: 4.59, 309: 4.60, 310: 4.60, 311: 4.61, 312: 4.61,
+    313: 4.62, 314: 4.63, 315: 4.63, 316: 4.64, 317: 4.64, 318: 4.65, 319: 4.65, 320: 4.66,
+    321: 4.66, 322: 4.67, 323: 4.67, 324: 4.68, 325: 4.69, 326: 4.69, 327: 4.70, 328: 4.70,
+    329: 4.71, 330: 4.71, 331: 4.72, 332: 4.72, 333: 4.73, 334: 4.74, 335: 4.74, 336: 4.75,
+    337: 4.75, 338: 4.76, 339: 4.76, 340: 4.77, 341: 4.77, 342: 4.78, 343: 4.78, 344: 4.79,
+    345: 4.80, 346: 4.80, 347: 4.81, 348: 4.81, 349: 4.82, 350: 4.82, 351: 4.83, 352: 4.83,
+    353: 4.84, 354: 4.85, 355: 4.85, 356: 4.86, 357: 4.86, 358: 4.87, 359: 4.87, 360: 4.88,
+    361: 4.88, 362: 4.89, 363: 4.89, 364: 4.90, 365: 5.00,
+}
+
+DAILY_BOUNDARIES = [7, 14, 30, 50, 100, 200, 365]
+DAILY_EMOJIS = ["📅", "✨", "✨", "🔥", "🔥", "💎", "💎"]
+DAILY_BONUSES = {7: 500, 14: 1000, 30: 2000, 50: 5000, 100: 7500, 200: 10000, 365: 25000}
+
+def get_streak_multiplier(streak):
+    if streak in DAILY_MULTIPLIERS:
+        return DAILY_MULTIPLIERS[streak]
+    return DAILY_MULTIPLIERS[365]  # beyond day 365, hold at the max multiplier
+
+def get_daily_bracket(streak):
+    for i, boundary in enumerate(DAILY_BOUNDARIES):
+        if streak <= boundary:
+            bracket_start = 1 if i == 0 else DAILY_BOUNDARIES[i - 1] + 1
+            return bracket_start, boundary, DAILY_EMOJIS[i]
+    # beyond day 365, stay pinned to the final bracket
+    return DAILY_BOUNDARIES[-2] + 1, DAILY_BOUNDARIES[-1], DAILY_EMOJIS[-1]
+
+def compute_filled_boxes(streak, bracket_start, bracket_end):
+    day_in_bracket = streak - bracket_start + 1
+    bracket_length = bracket_end - bracket_start + 1
+
+    if (bracket_start, bracket_end) in [(1, 7), (8, 14)]:
+        cumulative = [1, 3, 5, 5, 7, 8, 10]
+        return cumulative[min(day_in_bracket, 7) - 1]
+
+    if (bracket_start, bracket_end) == (15, 30):
+        skip_days = {17, 19, 21, 24, 27, 29}
+        filled = 0
+        for d in range(15, streak + 1):
+            if d not in skip_days:
+                filled += 1
+        return min(filled, 10)
+
+    filled = math.ceil(day_in_bracket / (bracket_length / 10))
+    return min(filled, 10)
+
+async def add_raw_xp(guild_id, member, xp_gained, channel):
+    if xp_gained <= 0:
+        return
+    local_cursor = conn.cursor()
+    local_cursor.execute(
+        "INSERT INTO Level (server_id, user_id, level, xp) VALUES (?, ?, 0, ?) "
+        "ON CONFLICT(server_id, user_id) DO UPDATE SET xp = xp + ?",
+        (str(guild_id), str(member.id), xp_gained, xp_gained)
+    )
+    conn.commit()
+
+    local_cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (str(guild_id), str(member.id)))
+    level, total_xp = local_cursor.fetchone()
+
+    leveled_up = False
+    while total_xp >= xp_required_for_level(level + 1):
+        level += 1
+        leveled_up = True
+
+    if leveled_up:
+        local_cursor.execute("UPDATE Level SET level = ? WHERE server_id = ? AND user_id = ?", (level, str(guild_id), str(member.id)))
+        conn.commit()
+        local_cursor.execute("SELECT balance FROM users WHERE id = ?", (str(member.id),))
+        row = local_cursor.fetchone()
+        balance = row[0] if row else 0
+        avatar_bytes = await member.display_avatar.read()
+        img = await asyncio.to_thread(generate_levelup_image, avatar_bytes, level, total_xp, balance)
+        await channel.send(
+            content=f"{member.mention} reached level **{level}**. Congratulations. We are proud of you!!",
+            file=discord.File(fp=img, filename="levelup.png")
+    )
+    
+
+
+
 # --- 6. COMMANDS (REPLACEMENTS) ---
 
 
@@ -1782,31 +1910,74 @@ async def beg(interaction: discord.Interaction):
 
 @client.tree.command(name="daily", description="Claim your daily reward")
 async def daily(interaction: discord.Interaction):
-    await interaction.response.defer() # Added defer here too
-    
-    now = datetime.datetime.now()
-    cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    row = cursor.fetchone()
-    
-    if row and row[0]:
-        last_time = datetime.datetime.fromisoformat(row[0])
-        if now.date() == last_time.date():
-            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
-            diff = tomorrow - now
-            hours, remainder = divmod(int(diff.total_seconds()), 3600)
-            minutes, _ = divmod(remainder, 60)
-            embed = discord.Embed(description=f"{interaction.user.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red())
-            return await interaction.followup.send(embed=embed)
+    await interaction.response.defer()
+    await run_daily(interaction.user, interaction.channel, interaction.followup.send)
 
-    amount = random.randint(500, 1000)
-    cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(interaction.user.id), amount, now.isoformat(), amount, now.isoformat()))
+async def run_daily(member, channel, send_func):
+    now = datetime.datetime.now()
+    user_id = str(member.id)
+
+    cursor.execute('SELECT last_daily, balance, daily_streak FROM users WHERE id = ?', (user_id,))
+    row = cursor.fetchone()
+    last_daily_str = row[0] if row else None
+    streak = (row[2] if row and row[2] else 0)
+
+    if last_daily_str:
+        last_time = datetime.datetime.fromisoformat(last_daily_str)
+        hours_since = (now - last_time).total_seconds() / 3600
+
+        if hours_since < 24:
+            next_claim = last_time + datetime.timedelta(hours=24)
+            embed = discord.Embed(
+                description=f"⏳ You can claim your daily reward <t:{int(next_claim.timestamp())}:R>",
+                color=discord.Color.greyple()
+            )
+            embed.set_footer(text="Come back tomorrow!")
+            return await send_func(embed=embed)
+        elif hours_since > 48:
+            streak = 1
+        else:
+            streak += 1
+    else:
+        streak = 1
+
+    bracket_start, B, emoji = get_daily_bracket(streak)
+    E = max(0, B - streak)
+    filled = compute_filled_boxes(streak, bracket_start, B)
+    bar = "▰" * filled + "▱" * (10 - filled)
+
+    C = random.randint(500, 1000)
+    multiplier = get_streak_multiplier(streak)
+    coin_total = round(C * multiplier)
+    bonus = DAILY_BONUSES.get(streak, 0)
+    total_credited = coin_total + bonus
+    D = random.randint(50, 500)
+
+    cursor.execute(
+        'INSERT INTO users (id, balance, last_daily, daily_streak) VALUES (?, ?, ?, ?) '
+        'ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?, daily_streak = ?',
+        (user_id, total_credited, now.isoformat(), streak, total_credited, now.isoformat(), streak)
+    )
     conn.commit()
-    
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(interaction.user.id),))
-    new_bal = cursor.fetchone()[0]
-    
-    embed = discord.Embed(description=f"{interaction.user.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00)
-    await interaction.followup.send(embed=embed)
+
+    bonus_suffix = f" *(+{bonus} bonus)*" if bonus > 0 else ""
+
+    embed = discord.Embed(
+        description=(
+            f"{emoji} **Day {streak}** Activity Streak\n"
+            f"`{bar}` {streak}/{B}\n\n"
+            f"🪙 **+{C} coins** ×{multiplier:.2f}{bonus_suffix}\n"
+            f"⭐ **+{D} XP**"
+        ),
+        color=discord.Color.gold()
+    )
+    embed.set_author(name=f"{member.name}'s Daily Reward", icon_url=member.display_avatar.url)
+    embed.set_footer(text=f"{E} days until Day {B} bonus upgrade")
+    embed.timestamp = now
+
+    await send_func(embed=embed)
+    await add_raw_xp(member.guild.id if hasattr(member, 'guild') else channel.guild.id, member, D, channel)
+
 
 
 @client.tree.command(name="cointoss", description="Bet your coins on a coin flip")
@@ -2698,25 +2869,8 @@ async def px_beg(message, args):
 
 # --- 20. daily ---
 async def px_daily(message, args):
-    now = datetime.datetime.now()
-    cursor.execute('SELECT last_daily, balance FROM users WHERE id = ?', (str(message.author.id),))
-    row = cursor.fetchone()
-    if row and row[0]:
-        last_time = datetime.datetime.fromisoformat(row[0])
-        if now.date() == last_time.date():
-            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
-            diff = tomorrow - now
-            hours, remainder = divmod(int(diff.total_seconds()), 3600)
-            minutes, _ = divmod(remainder, 60)
-            return await message.channel.send(embed=discord.Embed(description=f"{message.author.mention}\nYou've already claimed your daily reward. Please wait **{hours}h {minutes}m** to claim again.", color=discord.Color.red()))
-
-    amount = random.randint(500, 1000)
-    cursor.execute('INSERT INTO users (id, balance, last_daily) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET balance = balance + ?, last_daily = ?', (str(message.author.id), amount, now.isoformat(), amount, now.isoformat()))
-    conn.commit()
-    cursor.execute('SELECT balance FROM users WHERE id = ?', (str(message.author.id),))
-    new_bal = cursor.fetchone()[0]
-    await message.channel.send(embed=discord.Embed(description=f"{message.author.mention} claimed their daily reward!\n**Amount:** {amount} 🪙\n**Balance:** {new_bal} 🪙", color=0xFFFF00))
-
+    await run_daily(message.author, message.guild.id, message.channel, message.channel.send)
+    
 # --- 21. cointoss ---
 async def px_cointoss(message, args):
     amount = None
