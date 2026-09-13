@@ -646,118 +646,156 @@ class BulkGachaView(discord.ui.View):
 
 
 
+def build_xp_bar(level, total_xp):
+    current_threshold = xp_required_for_level(level)
+    next_threshold = xp_required_for_level(level + 1)
+    needed = next_threshold - current_threshold
+    xp_into_level = total_xp - current_threshold
 
-class ProfileFavouriteSelect(ui.Select):
-    def __init__(self, owner_id, page_cards, current_page, total_pages):
-        options = [discord.SelectOption(label=f"{name} - {rarity}", value=card_id) 
-                   for card_id, name, rarity, _, _ in page_cards]
-        super().__init__(placeholder="Select a card", options=options[:25])
-        self.owner_id = owner_id
-        self.current_page = current_page
-        self.total_pages = total_pages
+    box_value = needed / 20 if needed > 0 else 1
+    filled = int(xp_into_level / box_value)
+    filled = max(0, min(20, filled))
+    percent = round((xp_into_level / needed) * 100) if needed > 0 else 0
 
-    async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
-        card_id = self.values[0]
-        cursor.execute("INSERT INTO favourite_card (user_id, card_id) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET card_id = ?",
-                       (str(self.owner_id), card_id, card_id))
-        conn.commit()
-        cursor.execute("SELECT c.card_id, c.name, c.rarity, c.value, c.image FROM cards WHERE card_id = ?", (card_id,))
-        card = cursor.fetchone()
-        await interaction.response.edit_message(embed=create_profile_embed(interaction.user, card), view=None)
+    bar = "[" + ("█" * filled) + ("░" * (20 - filled)) + "]"
+    return bar, percent, xp_into_level, needed
 
 
-class ProfileFavouriteView(ui.View):
-    def __init__(self, owner_id, cards, current_page, total_pages):
-        super().__init__(timeout=120)
-        self.owner_id = owner_id
-        self.cards = cards
-        self.current_page = current_page
-        self.total_pages = total_pages
-        self.add_item(ProfileFavouriteSelect(owner_id, cards[current_page], current_page, total_pages))
+def create_profile_embed(display_user, guild_id, favourite_card=None):
+    cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (str(guild_id), str(display_user.id)))
+    row = cursor.fetchone()
+    level, xp = row if row else (0, 0)
 
-    @ui.button(label="⬅️", style=discord.ButtonStyle.grey)
-    async def prev_page(self, interaction: discord.Interaction, button: ui.Button):
-        if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.clear_items()
-            self.add_item(ProfileFavouriteSelect(self.owner_id, self.cards[self.current_page], self.current_page, self.total_pages))
-            await interaction.response.edit_message(embed=create_favourite_select_embed(self.cards, self.current_page, self.total_pages), view=self)
+    bar, percent, xp_into, needed = build_xp_bar(level, xp)
 
-    @ui.button(label="➡️", style=discord.ButtonStyle.grey)
-    async def next_page(self, interaction: discord.Interaction, button: ui.Button):
-        if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
-        if self.current_page < self.total_pages - 1:
-            self.current_page += 1
-            self.clear_items()
-            self.add_item(ProfileFavouriteSelect(self.owner_id, self.cards[self.current_page], self.current_page, self.total_pages))
-            await interaction.response.edit_message(embed=create_favourite_select_embed(self.cards, self.current_page, self.total_pages), view=self)
+    desc = (
+        f"## Your Profile\n"
+        f"`{display_user.name}'s profile`\n\n"
+        f"────────────────\n"
+        f"**Level:** {level} | **Progression:** {percent}% | {xp_into}/{needed} **XP**\n"
+        f"{bar}\n\n"
+        f"────────────────\n"
+        f"### Favourite Card\n"
+    )
 
-
-class ProfileChangeView(ui.View):
-    def __init__(self, owner_id):
-        super().__init__(timeout=120)
-        self.owner_id = owner_id
-
-    @ui.button(label="Change Favourite Card", style=discord.ButtonStyle.blurple)
-    async def change_fav(self, interaction: discord.Interaction, button: ui.Button):
-        if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
-        
-        cursor.execute('''SELECT c.card_id, c.name, c.rarity, c.value, c.image FROM inventory i
-                          JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?
-                          ORDER BY c.value DESC''', (str(self.owner_id),))
-        all_cards = cursor.fetchall()
-        
-        if not all_cards:
-            return await interaction.response.send_message("❌ You don't have any cards!", ephemeral=True)
-        
-        pages = [all_cards[i:i+10] for i in range(0, len(all_cards), 10)]
-        view = ProfileFavouriteView(self.owner_id, pages, 0, len(pages))
-        await interaction.response.edit_message(embed=create_favourite_select_embed(pages, 0, len(pages)), view=view)
-
-
-def create_profile_embed(user: discord.Member, favourite_card=None):
-    cursor.execute("SELECT balance FROM users WHERE id = ?", (str(user.id),))
-    balance_row = cursor.fetchone()
-    balance = balance_row[0] if balance_row else 0
-    
-    cursor.execute("SELECT level, xp FROM Level WHERE server_id = ? AND user_id = ?", (user.guild.id if hasattr(user, 'guild') else "0", str(user.id)))
-    level_row = cursor.fetchone()
-    level, xp = level_row if level_row else (0, 0)
-    
-    next_level_xp = xp_required_for_level(level + 1)
-    progress_percent = int((xp / next_level_xp * 100)) if next_level_xp > 0 else 0
-    
-    progress_bar = "["
-    filled = int(progress_percent / 5)
-    for i in range(20):
-        progress_bar += "█" if i < filled else "░"
-    progress_bar += "]"
-    
-    embed = discord.Embed(title="Your Profile", description=f"{user.name}'s profile", color=discord.Color.blurple())
-    embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(name="Balance", value=f"🪙 {balance}", inline=False)
-    embed.add_field(name="Level & XP", value=f"**Level:** {level} | **Progression:** {progress_percent}% | {xp}/{next_level_xp} **XP**\n{progress_bar}", inline=False)
-    
     if favourite_card:
         card_id, card_name, rarity, value, image = favourite_card
-        embed.add_field(name="Favourite Card", value=f"Name: {card_name}\nRarity: {rarity}\nValue: {value}", inline=False)
-        if image:
-            embed.set_image(url=image)
-    
+        desc += f"**Name:** {card_name}\n**Rarity:** {rarity}\n**Value:** {value} 🪙"
+
+    embed = discord.Embed(description=desc, color=discord.Color.blurple())
+    embed.set_thumbnail(url=display_user.display_avatar.url)
+    if favourite_card and favourite_card[4]:
+        embed.set_image(url=favourite_card[4])
+
     return embed
 
 
 def create_favourite_select_embed(pages, current_page, total_pages):
     page_cards = pages[current_page]
-    desc = "\n".join([f"{i+1}. {name} - {rarity}" for i, (_, name, rarity, _, _) in enumerate(page_cards)])
-    embed = discord.Embed(title="Select Favourite Card", description=f"Page {current_page + 1}/{total_pages}\n\n{desc}", color=discord.Color.blurple())
-    return embed
+    desc = f"## Select Favourite Card\nPage {current_page + 1}/{total_pages}\n\n"
+    desc += "\n".join([f"{i+1}. {name} - {rarity}" for i, (_, name, rarity, _, _) in enumerate(page_cards)])
+    return discord.Embed(description=desc, color=discord.Color.blurple())
+
+
+def build_profile_view(owner_id, balance):
+    view = ui.View(timeout=120)
+
+    async def balance_noop(interaction: discord.Interaction):
+        await interaction.response.defer()
+
+    balance_button = ui.Button(label=f"{balance} 🪙", style=discord.ButtonStyle.grey)
+    balance_button.callback = balance_noop
+    view.add_item(balance_button)
+
+    async def change_fav(interaction: discord.Interaction):
+        if interaction.user.id != owner_id:
+            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+        cursor.execute('''SELECT c.card_id, c.name, c.rarity, c.value, c.image FROM inventory i
+                          JOIN cards c ON i.card_id = c.card_id WHERE i.user_id = ?
+                          ORDER BY c.value DESC''', (str(owner_id),))
+        all_cards = cursor.fetchall()
+        if not all_cards:
+            return await interaction.response.send_message("❌ You don't have any cards!", ephemeral=True)
+        pages = [all_cards[i:i + 10] for i in range(0, len(all_cards), 10)]
+        select_view = ProfileFavouriteView(owner_id, pages, 0, len(pages), balance)
+        await interaction.response.edit_message(embed=create_favourite_select_embed(pages, 0, len(pages)), view=select_view)
+
+    change_button = ui.Button(label="Change Favourite Card", style=discord.ButtonStyle.blurple)
+    change_button.callback = change_fav
+    view.add_item(change_button)
+
+    return view
+
+
+class ProfileFavouriteSelect(ui.Select):
+    def __init__(self, owner_id, page_cards, balance):
+        options = [discord.SelectOption(label=f"{name} - {rarity}"[:100], value=card_id)
+                   for card_id, name, rarity, _, _ in page_cards]
+        super().__init__(placeholder="Select a card", options=options[:25])
+        self.owner_id = owner_id
+        self.balance = balance
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+
+        card_id = self.values[0]
+        cursor.execute(
+            "INSERT INTO favourite_card (user_id, card_id) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET card_id = ?",
+            (str(self.owner_id), card_id, card_id)
+        )
+        conn.commit()
+
+        cursor.execute("SELECT card_id, name, rarity, value, image FROM cards WHERE card_id = ?", (card_id,))
+        card = cursor.fetchone()
+
+        embed = create_profile_embed(interaction.user, interaction.guild.id, card)
+        view = build_profile_view(self.owner_id, self.balance)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class ProfileFavouritePrevButton(ui.Button):
+    def __init__(self, parent_view):
+        super().__init__(label="⬅️", style=discord.ButtonStyle.grey)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        pv = self.parent_view
+        if interaction.user.id != pv.owner_id:
+            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+        if pv.current_page > 0:
+            new_page = pv.current_page - 1
+            new_view = ProfileFavouriteView(pv.owner_id, pv.pages, new_page, pv.total_pages, pv.balance)
+            await interaction.response.edit_message(embed=create_favourite_select_embed(pv.pages, new_page, pv.total_pages), view=new_view)
+
+
+class ProfileFavouriteNextButton(ui.Button):
+    def __init__(self, parent_view):
+        super().__init__(label="➡️", style=discord.ButtonStyle.grey)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        pv = self.parent_view
+        if interaction.user.id != pv.owner_id:
+            return await interaction.response.send_message("❌ This isn't your menu.", ephemeral=True)
+        if pv.current_page < pv.total_pages - 1:
+            new_page = pv.current_page + 1
+            new_view = ProfileFavouriteView(pv.owner_id, pv.pages, new_page, pv.total_pages, pv.balance)
+            await interaction.response.edit_message(embed=create_favourite_select_embed(pv.pages, new_page, pv.total_pages), view=new_view)
+
+
+class ProfileFavouriteView(ui.View):
+    def __init__(self, owner_id, pages, current_page, total_pages, balance):
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+        self.pages = pages
+        self.current_page = current_page
+        self.total_pages = total_pages
+        self.balance = balance
+        self.add_item(ProfileFavouriteSelect(owner_id, pages[current_page], balance))
+        self.add_item(ProfileFavouritePrevButton(self))
+        self.add_item(ProfileFavouriteNextButton(self))
+    
 
 # --- 5. BOT SETUP ---
 class GachaBot(discord.Client):
@@ -1866,16 +1904,19 @@ async def leaderboard(interaction: discord.Interaction, type: app_commands.Choic
 @client.tree.command(name="profile", description="View your profile with level and favourite card")
 async def profile(interaction: discord.Interaction):
     await interaction.response.defer()
+    cursor.execute("SELECT balance FROM users WHERE id = ?", (str(interaction.user.id),))
+    bal_row = cursor.fetchone()
+    balance = bal_row[0] if bal_row else 0
+
     cursor.execute("SELECT card_id FROM favourite_card WHERE user_id = ?", (str(interaction.user.id),))
     fav_row = cursor.fetchone()
     fav_card = None
-    
     if fav_row:
         cursor.execute("SELECT card_id, name, rarity, value, image FROM cards WHERE card_id = ?", (fav_row[0],))
         fav_card = cursor.fetchone()
-    
-    embed = create_profile_embed(interaction.user, fav_card)
-    view = ProfileChangeView(interaction.user.id)
+
+    embed = create_profile_embed(interaction.user, interaction.guild.id, fav_card)
+    view = build_profile_view(interaction.user.id, balance)
     await interaction.followup.send(embed=embed, view=view)
 
 
@@ -2759,16 +2800,19 @@ async def px_leaderboard(message, args):
 
 
 async def px_profile(message, args):
+    cursor.execute("SELECT balance FROM users WHERE id = ?", (str(message.author.id),))
+    bal_row = cursor.fetchone()
+    balance = bal_row[0] if bal_row else 0
+
     cursor.execute("SELECT card_id FROM favourite_card WHERE user_id = ?", (str(message.author.id),))
     fav_row = cursor.fetchone()
     fav_card = None
-    
     if fav_row:
         cursor.execute("SELECT card_id, name, rarity, value, image FROM cards WHERE card_id = ?", (fav_row[0],))
         fav_card = cursor.fetchone()
-    
-    embed = create_profile_embed(message.author, fav_card)
-    view = ProfileChangeView(message.author.id)
+
+    embed = create_profile_embed(message.author, message.guild.id, fav_card)
+    view = build_profile_view(message.author.id, balance)
     await message.channel.send(embed=embed, view=view)
 
 
